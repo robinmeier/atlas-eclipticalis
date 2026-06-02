@@ -141,13 +141,13 @@ function init()
     params:set_action(p, sky_action)
   end
 
+  Stars.load()
+
   params:read()
   params:bang()
 
   midi_out = midi.connect(params:get("midi_device"))
   params:set_action("midi_device", function(v) midi_out = midi.connect(v) end)
-
-  Stars.load()
 
   local px, py = Stars.default_pan(
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
@@ -231,5 +231,5 @@ function key(n, z)
 end
 
 function cleanup()
-  update_metro:stop()
+  if update_metro then update_metro:stop() end
 end
