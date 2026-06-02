@@ -34,10 +34,7 @@ local update_metro
 -- Sky rebuild
 
 local function rebuild()
-  sky = Stars.compute(
-    params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
-    params:get("lat"), params:get("lon")
-  )
+  sky = Stars.compute()
   state.year  = params:get("year")
   state.month = params:get("month")
   state.day   = params:get("day")
@@ -53,8 +50,13 @@ local function pitch_from_screen_y(sy)
   return util.midi_to_hz(note), note
 end
 
+local note_off_clocks = {}
+
 local function trigger_star(star)
-  local sx   = (star.vx - state.pan_x) * state.zoom
+  local dvx  = star.vx - state.pan_x
+  dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+  if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
+  local sx   = dvx * state.zoom
   local sy   = (star.vy - state.pan_y) * state.zoom
   local freq, note = pitch_from_screen_y(sy)
   local amp  = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
@@ -63,13 +65,16 @@ local function trigger_star(star)
 
   engine.note(freq, amp * vol, pan, 1.5, 2.0)
 
-  local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
-  local ch  = params:get("midi_channel")
-  midi_out:note_on(note, vel, ch)
-  clock.run(function()
-    clock.sleep(1.5)
-    midi_out:note_off(note, 0, ch)
-  end)
+  if midi_out then
+    local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
+    local ch  = params:get("midi_channel")
+    midi_out:note_on(note, vel, ch)
+    local cid = clock.run(function()
+      clock.sleep(1.5)
+      if midi_out then midi_out:note_off(note, 0, ch) end
+    end)
+    table.insert(note_off_clocks, cid)
+  end
 end
 
 -- -------------------------------------------------------------------------
@@ -98,9 +103,10 @@ local function update_frame()
     -- Check stars near playhead
     for _, star in ipairs(sky) do
       if star.dice <= state.density and not triggered[star.id] then
-        local sx = (star.vx - state.pan_x) * state.zoom
-        -- Also check wrapped position
-        if sx < -4 then sx = sx + 2400 * state.zoom end
+        local dvx = star.vx - state.pan_x
+        dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+        if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
+        local sx = dvx * state.zoom
         if math.abs(sx - state.playhead_x) < 1.5 then
           trigger_star(star)
           triggered[star.id] = true
@@ -109,6 +115,10 @@ local function update_frame()
     end
   end
 
+  redraw()
+end
+
+function redraw()
   UI.draw(sky, state)
 end
 
@@ -128,7 +138,7 @@ function init()
   params:add_number("lon",   "Longitude", -180, 180,  2)
 
   params:add_separator("SOUND")
-  params:add_control("scan_speed",  "Scan Speed",  controlspec.new(1,  60, 'lin', 0.5, 8,   "px/s"))
+  params:add_control("scan_speed",  "Scan Speed",  controlspec.new(1,  60, 'lin', 0.5, 24,  "px/s"))
   params:add_control("pitch_base",  "Pitch Base",  controlspec.new(24, 84, 'lin', 1,   48,  "midi"))
   params:add_control("pitch_range", "Pitch Range", controlspec.new(1,  48, 'lin', 1,   24,  "semi"))
   params:add_control("volume",      "Volume",      controlspec.new(0,   1, 'lin', 0.01, 0.7, ""))
@@ -232,4 +242,8 @@ end
 
 function cleanup()
   if update_metro then update_metro:stop() end
+  for _, cid in ipairs(note_off_clocks) do
+    clock.cancel(cid)
+  end
+  note_off_clocks = {}
 end
