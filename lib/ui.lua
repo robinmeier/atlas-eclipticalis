@@ -23,10 +23,11 @@ function UI.draw(sky_stars, state)
   -- Stars
   for _, star in ipairs(sky_stars) do
     if star.dice <= state.density then
-      -- Screen position from virtual coordinates
-      local sx = math.floor((star.vx - state.pan_x) * state.zoom + 0.5)
-      -- Wrap horizontal (sky is circular in RA)
-      if sx < -4 then sx = sx + math.floor(2400 * state.zoom) end
+      -- Screen position from virtual coordinates, with proper circular wrap
+      local dvx = star.vx - state.pan_x
+      dvx = ((dvx % 2400) + 2400) % 2400
+      if dvx > 1200 then dvx = dvx - 2400 end
+      local sx = math.floor(dvx * state.zoom + 0.5)
       local sy = math.floor((star.vy - state.pan_y) * state.zoom + 0.5)
 
       if sx >= -1 and sx <= 128 and sy >= -1 and sy <= 64 then

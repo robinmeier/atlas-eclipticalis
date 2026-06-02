@@ -309,23 +309,11 @@ function Stars.load()
   end
 end
 
--- Recompute which stars are above the horizon for given date/time/location.
--- Returns a list of star tables with current .alt populated.
-function Stars.compute(year, month, day, hour, lat, lon)
-  local julian = jd(year, month, day, hour)
-  local lst    = (gmst(julian) + lon / 15 + 24) % 24
-  local result = {}
-  for _, star in ipairs(_all) do
-    local ha_deg = ((lst - star.ra) * 15 + 360) % 360
-    local alt    = altitude(ha_deg, star.dec, lat)
-    if alt > -8 then
-      local s = {}
-      for k, v in pairs(star) do s[k] = v end
-      s.alt = alt
-      table.insert(result, s)
-    end
-  end
-  return result
+-- Return all loaded stars (full atlas, not filtered by horizon).
+-- The date/location only governs the initial pan position via default_pan().
+-- Cage's original used the full atlas as score, not the live visible sky.
+function Stars.compute()
+  return _all
 end
 
 -- Default pan position: center screen on stars transiting the local meridian
