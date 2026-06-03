@@ -14,77 +14,95 @@ local state = {
   pan_x      = 0,
   pan_y      = 200,
   zoom       = 2.0,
-  mode       = "auto",    -- "auto" | "cursor"
+  mode       = "auto",
   playing    = false,
   playhead_x = 0.0,
   density    = 0.45,
   blink      = false,
-  debug      = true,      -- on by default while we diagnose
+  debug      = true,
   year = 2000, month = 1, day = 1,
   flash_times = {},
 }
 
--- Debug / instrumentation, surfaced on screen
 local dbg = {
-  fps        = 0,
-  trig_count = 0,
-  last_note  = 0,
-  last_freq  = 0,
-  eng_ok     = true,
-  eng_err    = "",
-  midi_name  = "?",
-  midi_ok    = true,
-  midi_err   = "",
-  visible    = 0,
+  fps = 0, dt = 0,
+  sky_n = 0, active_n = 0, visible_n = 0,
+  trig_count = 0, last_note = 0, last_freq = 0,
+  eng_ok = true, eng_err = "",
+  midi_name = "none", midi_ok = true, midi_err = "",
+  frame_err = "",
 }
 state.dbg = dbg
 
 local sky              = {}
 local triggered        = {}
 local k_held           = {false, false, false}
-local k1_modifier_used = false
-local k2_modifier_used = false
+local k1_mod_used      = false
+local k2_mod_used      = false
 local midi_out
 local update_clock_id
-local note_off_clocks  = {}
+local note_off_metro   -- single metro fires note-offs from a queue
+local note_off_queue   = {}
 local last_time        = 0
 local blink_acc        = 0
 
 -- -------------------------------------------------------------------------
--- Safe wrappers — these MUST NEVER throw, so the update loop can't die
+-- Safe wrappers
 
 local function safe_engine_note(freq, amp, pan, sus, rel)
   local ok, err = pcall(engine.note, freq, amp, pan, sus, rel)
-  dbg.eng_ok = ok
-  if not ok then dbg.eng_err = tostring(err) end
+  dbg.eng_ok  = ok
+  if not ok then dbg.eng_err = tostring(err):sub(1, 32) end
 end
 
 local function safe_note_on(note, vel, ch)
   if not midi_out then
     dbg.midi_ok = false; dbg.midi_err = "no device"; return
   end
-  local ok, err = pcall(midi_out.note_on, midi_out, note, vel, ch)
+  local ok, err = pcall(function() midi_out:note_on(note, vel, ch) end)
   dbg.midi_ok = ok
-  if not ok then dbg.midi_err = tostring(err) end
+  if not ok then dbg.midi_err = tostring(err):sub(1, 32) end
 end
 
 local function safe_note_off(note, ch)
   if not midi_out then return end
-  pcall(midi_out.note_off, midi_out, note, 0, ch)
+  pcall(function() midi_out:note_off(note, 0, ch) end)
 end
 
 local function connect_midi(n)
   local ok, dev = pcall(midi.connect, n)
   if ok and dev then
-    midi_out      = dev
-    dbg.midi_name = dev.name or ("vport " .. n)
-    dbg.midi_ok   = true
-    dbg.midi_err  = ""
+    midi_out = dev
+    dbg.midi_name = dev.name or ("port " .. n)
+    dbg.midi_ok = true; dbg.midi_err = ""
   else
-    midi_out      = nil
-    dbg.midi_ok   = false
-    dbg.midi_err  = tostring(dev)
+    midi_out = nil; dbg.midi_ok = false
+    dbg.midi_err = tostring(dev):sub(1, 28)
   end
+end
+
+-- -------------------------------------------------------------------------
+-- Note-off metro: drains the queue once per second, checking timestamps
+
+local function init_note_off_metro()
+  note_off_metro = metro.init(function()
+    local now = util.time()
+    local keep = {}
+    for _, ev in ipairs(note_off_queue) do
+      if now >= ev.when then
+        safe_note_off(ev.note, ev.ch)
+      else
+        table.insert(keep, ev)
+      end
+    end
+    note_off_queue = keep
+  end, 0.05, -1)   -- check every 50 ms
+  note_off_metro:start()
+end
+
+local function schedule_note_off(note, ch, delay)
+  table.insert(note_off_queue, { note = note, ch = ch,
+                                  when = util.time() + delay })
 end
 
 -- -------------------------------------------------------------------------
@@ -98,11 +116,16 @@ local function screen_x(star)
 end
 
 local function rebuild()
-  sky       = Stars.compute()
+  sky = Stars.compute()
   state.year  = params:get("year")
   state.month = params:get("month")
   state.day   = params:get("day")
   triggered   = {}
+  -- Update debug counts
+  dbg.sky_n = #sky
+  local a = 0
+  for _, s in ipairs(sky) do if s.dice <= state.density then a = a + 1 end end
+  dbg.active_n = a
 end
 
 local function pitch_from_sy(sy)
@@ -127,19 +150,17 @@ local function trigger_star(star)
 
   dbg.trig_count = dbg.trig_count + 1
   dbg.last_note  = note
-  dbg.last_freq  = freq
+  dbg.last_freq  = math.floor(freq)
 
   local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
   local ch  = params:get("midi_channel")
   safe_note_on(note, vel, ch)
-  local cid = clock.run(function()
-    clock.sleep(1.5)
-    safe_note_off(note, ch)
-  end)
-  table.insert(note_off_clocks, cid)
+  schedule_note_off(note, ch, 1.5)
 end
 
-local function trigger_range(lo, hi)
+-- Trigger stars whose screen_x is within 'band' pixels of 'px'
+local function trigger_at(px, band)
+  local lo, hi = px - band, px + band
   for _, star in ipairs(sky) do
     if star.dice <= state.density and not triggered[star.id] then
       local sx = screen_x(star)
@@ -152,35 +173,48 @@ local function trigger_range(lo, hi)
 end
 
 -- -------------------------------------------------------------------------
--- Update loop — ~33 fps, delta-time based
+-- Update loop
 
 local function update_frame()
   local now = util.time()
   local dt  = math.min(now - last_time, 0.1)
   last_time = now
-  if dt > 0 then dbg.fps = math.floor(1 / dt + 0.5) end
+  dbg.dt = math.floor(dt * 1000)
+  if dt > 0 then dbg.fps = math.floor(1/dt + 0.5) end
 
   blink_acc = blink_acc + dt
   if blink_acc >= 0.5 then
     blink_acc = blink_acc - 0.5
     state.blink = not state.blink
+    -- Prune stale flashes
     for id, t in pairs(state.flash_times) do
       if now - t > 1.0 then state.flash_times[id] = nil end
     end
+    -- Refresh visible count
+    local v = 0
+    for _, s in ipairs(sky) do
+      if s.dice <= state.density then
+        local sx = screen_x(s)
+        if sx >= 0 and sx <= 127 then v = v + 1 end
+      end
+    end
+    dbg.visible_n = v
   end
 
   if state.mode == "auto" and state.playing then
-    local prev_x = state.playhead_x
-    state.playhead_x = state.playhead_x + params:get("scan_speed") * dt
+    local speed = params:get("scan_speed")
+    local step  = speed * dt
+
+    -- Trigger stars within a ±1.5 px band of the current playhead position
+    -- before advancing.  This is more robust than swept-interval detection.
+    trigger_at(state.playhead_x, 1.5)
+
+    state.playhead_x = state.playhead_x + step
 
     if state.playhead_x > 127 then
-      trigger_range(prev_x, 127)
       state.pan_x = (state.pan_x + 128.0 / state.zoom) % Stars.FIELD_W
-      state.playhead_x = state.playhead_x - 128
+      state.playhead_x = 0
       triggered = {}
-      trigger_range(0, state.playhead_x)
-    else
-      trigger_range(prev_x, state.playhead_x)
     end
   end
 
@@ -219,7 +253,6 @@ function init()
   end
 
   Stars.load()
-
   params:read()
   params:bang()
 
@@ -234,12 +267,18 @@ function init()
   state.pan_y = py
 
   rebuild()
+  init_note_off_metro()
 
   last_time = util.time()
   update_clock_id = clock.run(function()
     while true do
       clock.sleep(1/33)
-      update_frame()
+      -- Wrap entire frame in pcall so the loop cannot die
+      local ok, err = pcall(update_frame)
+      if not ok then
+        dbg.frame_err = tostring(err):sub(1, 40)
+        dbg.eng_ok = false
+      end
     end
   end)
 end
@@ -247,7 +286,7 @@ end
 function enc(n, d)
   if n == 1 then
     if k_held[1] then
-      k1_modifier_used = true
+      k1_mod_used = true
       state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom),
                                0, Stars.FIELD_H - 64)
     else
@@ -261,19 +300,18 @@ function enc(n, d)
             local dvx_old = star.vx - old_pan_x
             dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
             if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
-            local sx_old = dvx_old * state.zoom
-            local sx_new = screen_x(star)
-            local lo = math.min(sx_old, sx_new)
-            local hi = math.max(sx_old, sx_new)
+            local lo = math.min(dvx_old * state.zoom, screen_x(star))
+            local hi = math.max(dvx_old * state.zoom, screen_x(star))
             if lo <= 64 and hi >= 64 then trigger_star(star) end
           end
         end
       end
     end
+    redraw()
 
   elseif n == 2 then
     if k_held[2] then
-      k2_modifier_used = true
+      k2_mod_used = true
       state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
     else
       local factor = d > 0 and 1.06 or (1 / 1.06)
@@ -281,6 +319,7 @@ function enc(n, d)
         state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
       end
     end
+    redraw()
 
   elseif n == 3 then
     params:set("pitch_range", util.clamp(params:get("pitch_range") + d, 1, 48))
@@ -292,18 +331,17 @@ function key(n, z)
 
   if n == 1 then
     if z == 1 then
-      k1_modifier_used = false
-    elseif not k1_modifier_used then
+      k1_mod_used = false
+    elseif not k1_mod_used then
       state.debug = not state.debug
     end
 
   elseif n == 2 then
     if z == 1 then
-      k2_modifier_used = false
-    elseif not k2_modifier_used then
+      k2_mod_used = false
+    elseif not k2_mod_used then
       if state.mode == "auto" then
-        state.mode    = "cursor"
-        state.playing = false
+        state.mode = "cursor"; state.playing = false
       else
         state.mode = "auto"
       end
@@ -312,18 +350,13 @@ function key(n, z)
   elseif n == 3 and z == 1 then
     if state.mode == "auto" then
       state.playing = not state.playing
-      if state.playing then
-        triggered = {}
-        last_time = util.time()
-      end
+      if state.playing then triggered = {}; last_time = util.time() end
     end
   end
 end
 
 function cleanup()
   if update_clock_id then clock.cancel(update_clock_id) end
-  for _, cid in ipairs(note_off_clocks) do
-    clock.cancel(cid)
-  end
-  note_off_clocks = {}
+  if note_off_metro  then note_off_metro:stop() end
+  note_off_queue = {}
 end
