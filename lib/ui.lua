@@ -1,18 +1,23 @@
--- Screen rendering — atmospheric style (style 2 from mockup approval)
+-- Screen rendering — atmospheric style (style 2)
 
 local UI = {}
 
 local STAFF_Y   = {14, 21, 28, 35, 42}
-local STAFF_TOP = 10   -- above which stars are "above staff"
-local STAFF_BOT = 46   -- below which stars are "below staff"
+local STAFF_TOP = 10
+local STAFF_BOT = 46
 
--- Return norns brightness level (0-15) from magnitude
+local FLASH_DUR = 0.35   -- seconds a flash lasts
+
+-- Ring of 12 pixels at radius ~2 used for the trigger flash
+local FLASH_RING = {{-2,0},{2,0},{0,-2},{0,2},
+                    {-2,-1},{2,-1},{-2,1},{2,1},
+                    {-1,-2},{1,-2},{-1,2},{1,2}}
+
 local function mag_level(mag, in_staff)
   local base = math.max(2, math.floor(15 - (mag + 1.5) * 1.8))
   return in_staff and math.min(15, base + 1) or base
 end
 
--- True if screen y is within the staff band
 local function on_staff(sy)
   return sy >= STAFF_TOP and sy <= STAFF_BOT
 end
@@ -20,21 +25,40 @@ end
 function UI.draw(sky_stars, state)
   screen.clear()
 
+  local now = util.time()
+
   -- Stars
   for _, star in ipairs(sky_stars) do
     if star.dice <= state.density then
-      -- Screen position from virtual coordinates, with proper circular wrap
       local dvx = star.vx - state.pan_x
       dvx = ((dvx % 2400) + 2400) % 2400
       if dvx > 1200 then dvx = dvx - 2400 end
       local sx = math.floor(dvx * state.zoom + 0.5)
       local sy = math.floor((star.vy - state.pan_y) * state.zoom + 0.5)
 
-      if sx >= -1 and sx <= 128 and sy >= -1 and sy <= 64 then
+      if sx >= -2 and sx <= 129 and sy >= -2 and sy <= 65 then
         local in_st = on_staff(sy)
         local lv    = mag_level(star.mag, in_st)
 
-        -- Atmospheric halo for bright stars (mag < 2.2)
+        -- Trigger flash: bright ring that fades out
+        local ft = state.flash_times[star.id]
+        if ft then
+          local frac = 1 - (now - ft) / FLASH_DUR
+          if frac > 0 then
+            local fl = math.floor(frac * 13)
+            screen.level(fl)
+            for _, dd in ipairs(FLASH_RING) do
+              local hx, hy = sx + dd[1], sy + dd[2]
+              if hx >= 0 and hx <= 127 and hy >= 0 and hy <= 63 then
+                screen.pixel(hx, hy)
+                screen.fill()
+              end
+            end
+            lv = 15   -- core at max brightness while flashing
+          end
+        end
+
+        -- Atmospheric halo for named bright stars
         if star.mag < 2.2 and not star.is_bg then
           screen.level(math.max(1, lv - 9))
           for _, d in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
@@ -49,7 +73,6 @@ function UI.draw(sky_stars, state)
         -- Core pixel(s)
         screen.level(lv)
         if star.mag < 1.0 and not star.is_bg then
-          -- 2×2 for very bright stars
           screen.rect(sx, sy, 2, 2)
         else
           screen.pixel(sx, sy)
@@ -67,7 +90,8 @@ function UI.draw(sky_stars, state)
     screen.stroke()
   end
 
-  -- Playhead or cursor
+  -- Playhead (auto) — sweeping line
+  -- Cursor (manual) — fixed line at x=64, slightly dimmer
   if state.mode == "auto" then
     local px = math.floor(state.playhead_x + 0.5)
     screen.level(15)
@@ -75,31 +99,23 @@ function UI.draw(sky_stars, state)
     screen.line(px, 63)
     screen.stroke()
   else
-    -- Crosshair cursor at screen centre
-    local cx, cy = 64, 32
     screen.level(10)
-    screen.move(cx - 4, cy)
-    screen.line(cx + 4, cy)
-    screen.stroke()
-    screen.move(cx, cy - 4)
-    screen.line(cx, cy + 4)
-    screen.stroke()
-    screen.level(4)
-    screen.circle(cx, cy, 6)
+    screen.move(64, 0)
+    screen.line(64, 63)
     screen.stroke()
   end
 
-  -- HUD: date top-left, mode + density bottom-right
+  -- HUD
   screen.font_size(8)
   screen.level(4)
   screen.move(2, 7)
   screen.text(string.format("%04d-%02d-%02d", state.year, state.month, state.day))
-
   screen.move(80, 62)
-  screen.text(string.format("%s  %d%%", state.mode == "auto" and "AUTO" or "CURS",
-                             math.floor(state.density * 100)))
+  screen.text(string.format("%s  %d%%",
+    state.mode == "auto" and "AUTO" or "CURS",
+    math.floor(state.density * 100)))
 
-  -- Playing indicator (blinking dot)
+  -- Blinking play dot (top-right)
   if state.mode == "auto" and state.playing then
     screen.level(state.blink and 12 or 3)
     screen.circle(127, 3, 2)
