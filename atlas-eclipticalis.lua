@@ -178,24 +178,24 @@ local function trigger_star(star)
   if type(vol) ~= "number" then vol = 0.7 end
   dbg.trig_stage = 5
 
-  safe_engine_note(freq, amp * vol, pan, 1.5, 2.0)
+  local out = params:get("out")
+  if out ~= 2 then safe_engine_note(freq, amp * vol, pan, 1.5, 2.0) end
   dbg.trig_stage = 6
 
   dbg.last_note = note
   dbg.last_freq = math.floor(freq)
   dbg.trig_stage = 7
 
-  local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
-  dbg.trig_stage = 8
-
-  local ch  = params:get("midi_channel")
-  if type(ch) ~= "number" then ch = 1 end
-  dbg.trig_stage = 9
-
-  safe_note_on(note, vel, ch)
-  dbg.trig_stage = 10
-
-  schedule_note_off(note, ch, 1.5)
+  if out >= 2 then
+    local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
+    dbg.trig_stage = 8
+    local ch  = params:get("midi_channel")
+    if type(ch) ~= "number" then ch = 1 end
+    dbg.trig_stage = 9
+    safe_note_on(note, vel, ch)
+    dbg.trig_stage = 10
+    schedule_note_off(note, ch, 1.5)
+  end
   dbg.trig_stage = 11
 end
 
@@ -291,6 +291,7 @@ function init()
   params:add_control("pitch_base",  "Pitch Base",  controlspec.new(24, 84, 'lin', 1,   48,  "midi"))
   params:add_control("pitch_range", "Pitch Range", controlspec.new(1,  48, 'lin', 1,   24,  "semi"))
   params:add_control("out_vol",     "Volume",      controlspec.new(0,   1, 'lin', 0.01, 0.7))
+  params:add_option("out", "Output", {"audio", "midi", "audio+midi"}, 1)
   params:add_number("midi_channel", "MIDI Channel", 1, 16, 1)
   params:add_number("midi_device",  "MIDI Device",  1, 16, 1)
 
@@ -305,6 +306,9 @@ function init()
 
   connect_midi(params:get("midi_device"))
   params:set_action("midi_device", function(v) connect_midi(v) end)
+  params:set_action("out", function(v)
+    if v >= 2 then connect_midi(params:get("midi_device")) end
+  end)
 
   -- Reconnect when norns assigns a device to a vport after init
   midi.add    = function(dev) connect_midi(params:get("midi_device")) end
