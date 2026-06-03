@@ -86,7 +86,8 @@ local function connect_midi(n)
   local ok, dev = pcall(midi.connect, n)
   if ok and dev then
     midi_out = dev
-    dbg.midi_name = (dev.name and dev.name ~= "" and dev.name) or ("port "..n)
+    local nm = (dev.name and dev.name ~= "" and dev.name) or "?"
+    dbg.midi_name = string.format("p%d:%s", n, nm)
     dbg.midi_ok = true; dbg.midi_err = ""
   else
     midi_out = nil; dbg.midi_ok = false
