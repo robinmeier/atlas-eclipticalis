@@ -148,20 +148,16 @@ function UI.draw_debug(state)
         state.playing and "ON" or "off", d.fps, d.dt))
   row(23, string.format("ph:%.1f px:%.0f z:%.1f",
         state.playhead_x, state.pan_x, state.zoom))
-  row(30, string.format("sky:%d act:%d vis:%d tc:%d",
-        d.sky_n, d.active_n, d.visible_n, d.trig_count))
+  row(30, string.format("sky:%d act:%d tc:%d ts:%d",
+        d.sky_n, d.active_n, d.trig_count, d.trig_stage))
   row(37, string.format("n:%d f:%d  %s",
         d.last_note, d.last_freq, d.eng_ok and "eng:OK" or ("E:"..d.eng_err)),
         d.eng_ok and 15 or 15)
-  -- MIDI row: name + send counter + ok/err
   local midi_status = d.midi_ok and d.midi_name or ("ERR:"..d.midi_err)
   row(44, string.format("midi:%s snd:%d", midi_status, d.midi_send_n),
         d.midi_ok and 10 or 15)
-  -- Device list so we can see what norns sees
-  row(51, "devs:" .. (d.midi_devs ~= "" and d.midi_devs or "?"), 8)
-  if d.frame_err ~= "" then
-    row(58, "!!" .. d.frame_err, 15)
-  end
+  row(51, "vp:" .. (d.midi_devs ~= "" and d.midi_devs or "?"), 8)
+  row(58, d.frame_err ~= "" and ("!!"..d.frame_err) or "ok", d.frame_err ~= "" and 15 or 5)
 end
 
 return UI
