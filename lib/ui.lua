@@ -134,30 +134,33 @@ function UI.draw_debug(state)
   local d = state.dbg
 
   screen.level(0)
-  screen.rect(0, 12, 128, 51)
+  screen.rect(0, 10, 128, 54)
   screen.fill()
 
-  screen.font_size(8)
+  screen.font_size(6)
   local function row(y, s, lv)
     screen.level(lv or 15)
     screen.move(2, y)
     screen.text(s)
   end
 
-  row(20, string.format("play:%s fps:%d dt:%dms",
+  row(16, string.format("play:%s fps:%d dt:%dms",
         state.playing and "ON" or "off", d.fps, d.dt))
-  row(28, string.format("ph:%.1f px:%.0f z:%.1f",
+  row(23, string.format("ph:%.1f px:%.0f z:%.1f",
         state.playhead_x, state.pan_x, state.zoom))
-  row(36, string.format("sky:%d act:%d vis:%d tc:%d",
+  row(30, string.format("sky:%d act:%d vis:%d tc:%d",
         d.sky_n, d.active_n, d.visible_n, d.trig_count))
-  row(44, string.format("n:%d f:%d  %s",
+  row(37, string.format("n:%d f:%d  %s",
         d.last_note, d.last_freq, d.eng_ok and "eng:OK" or ("E:"..d.eng_err)),
         d.eng_ok and 15 or 15)
+  -- MIDI row: name + send counter + ok/err
+  local midi_status = d.midi_ok and d.midi_name or ("ERR:"..d.midi_err)
+  row(44, string.format("midi:%s snd:%d", midi_status, d.midi_send_n),
+        d.midi_ok and 10 or 15)
+  -- Device list so we can see what norns sees
+  row(51, "devs:" .. (d.midi_devs ~= "" and d.midi_devs or "?"), 8)
   if d.frame_err ~= "" then
-    row(52, "!!" .. d.frame_err, 15)
-  else
-    row(52, "midi:" .. (d.midi_ok and d.midi_name or ("ERR "..d.midi_err)),
-          d.midi_ok and 10 or 15)
+    row(58, "!!" .. d.frame_err, 15)
   end
 end
 
