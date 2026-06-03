@@ -27,11 +27,12 @@ local state = {
 local dbg = {
   fps = 0, dt = 0,
   sky_n = 0, active_n = 0, visible_n = 0,
-  trig_count = 0, last_note = 0, last_freq = 0,
+  trig_count = 0, trig_stage = 0,
+  last_note = 0, last_freq = 0,
   eng_ok = true,  eng_err  = "",
   midi_name = "none", midi_ok = true, midi_err = "",
   midi_send_n = 0,   -- how many note_on attempts
-  midi_devs   = "",  -- snapshot of connected device names
+  midi_devs   = "",  -- snapshot of vport names
   frame_err = "",
 }
 state.dbg = dbg
@@ -87,24 +88,18 @@ end
 
 local function scan_midi_devices()
   local devs = {}
-  for _, d in pairs(midi.devices) do
-    local nm = (d.name and d.name ~= "" and d.name) or "?"
-    table.insert(devs, string.format("%d:%s", d.port or 0, nm))
+  for i = 1, #midi.vports do
+    local nm = midi.vports[i].name or "?"
+    table.insert(devs, i..":"..nm)
   end
   dbg.midi_devs = #devs > 0 and table.concat(devs, " ") or "none"
 end
 
 local function connect_midi(n)
-  local ok, dev = pcall(midi.connect, n)
-  if ok and dev then
-    midi_out = dev
-    local nm = (dev.name and dev.name ~= "" and dev.name) or "?"
-    dbg.midi_name = string.format("p%d:%s", n, nm)
-    dbg.midi_ok = true; dbg.midi_err = ""
-  else
-    midi_out = nil; dbg.midi_ok = false
-    dbg.midi_err = short_err(dev)
-  end
+  midi_out = midi.connect(n)
+  local nm = (midi_out.name ~= "" and midi_out.name) or "?"
+  dbg.midi_name = string.format("p%d:%s", n, nm)
+  dbg.midi_ok = true; dbg.midi_err = ""
   scan_midi_devices()
 end
 
@@ -159,15 +154,16 @@ end
 -- Note triggering
 
 local function trigger_star(star)
-  -- Increment first so it's visible even if something below throws
   dbg.trig_count = dbg.trig_count + 1
+  dbg.trig_stage = 1
 
   state.flash_times[star.id] = util.time()
+  dbg.trig_stage = 2
 
   local sx = screen_x(star)
   local sy = (star.vy - state.pan_y) * state.zoom
+  dbg.trig_stage = 3
 
-  -- Pitch — defensive param reads
   local pb = params:get("pitch_base")
   local pr = params:get("pitch_range")
   if type(pb) ~= "number" then pb = 48 end
@@ -175,22 +171,33 @@ local function trigger_star(star)
   local t    = 1 - util.clamp(sy / 63, 0, 1)
   local note = math.max(0, math.min(127, math.floor(pb + t * pr)))
   local freq = 440 * (2 ^ ((note - 69) / 12))
+  dbg.trig_stage = 4
 
   local amp = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
   local pan = util.clamp((sx / 64) - 1, -1, 1)
-
   local vol = params:get("out_vol")
   if type(vol) ~= "number" then vol = 0.7 end
+  dbg.trig_stage = 5
+
   safe_engine_note(freq, amp * vol, pan, 1.5, 2.0)
+  dbg.trig_stage = 6
 
   dbg.last_note = note
   dbg.last_freq = math.floor(freq)
+  dbg.trig_stage = 7
 
   local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
+  dbg.trig_stage = 8
+
   local ch  = params:get("midi_channel")
   if type(ch) ~= "number" then ch = 1 end
+  dbg.trig_stage = 9
+
   safe_note_on(note, vel, ch)
+  dbg.trig_stage = 10
+
   schedule_note_off(note, ch, 1.5)
+  dbg.trig_stage = 11
 end
 
 -- Trigger stars within ±band px of playhead position px.
@@ -299,11 +306,6 @@ function init()
 
   connect_midi(params:get("midi_device"))
   params:set_action("midi_device", function(v) connect_midi(v) end)
-
-  -- Reconnect if the device appears after init (common with USB MIDI)
-  midi.add = function(dev)
-    if dev.port == params:get("midi_device") then connect_midi(dev.port) end
-  end
 
   local px, py = Stars.default_pan(
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
