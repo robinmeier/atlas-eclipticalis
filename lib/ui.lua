@@ -137,27 +137,24 @@ function UI.draw_debug(state)
   screen.rect(0, 10, 128, 54)
   screen.fill()
 
-  screen.font_size(6)
+  screen.font_size(8)
   local function row(y, s, lv)
     screen.level(lv or 15)
     screen.move(2, y)
     screen.text(s)
   end
 
-  row(16, string.format("play:%s fps:%d dt:%dms",
+  row(19, string.format("play:%s fps:%d dt:%dms",
         state.playing and "ON" or "off", d.fps, d.dt))
-  row(23, string.format("ph:%.1f px:%.0f z:%.1f",
-        state.playhead_x, state.pan_x, state.zoom))
-  row(30, string.format("sky:%d act:%d tc:%d ts:%d",
-        d.sky_n, d.active_n, d.trig_count, d.trig_stage))
-  row(37, string.format("n:%d f:%d  %s",
-        d.last_note, d.last_freq, d.eng_ok and "eng:OK" or ("E:"..d.eng_err)),
-        d.eng_ok and 15 or 15)
+  row(27, string.format("tc:%d ts:%d  n:%d f:%d",
+        d.trig_count, d.trig_stage, d.last_note, d.last_freq))
+  row(35, d.eng_ok and "eng:OK" or ("eng ERR:"..d.eng_err),
+        d.eng_ok and 10 or 15)
   local midi_status = d.midi_ok and d.midi_name or ("ERR:"..d.midi_err)
-  row(44, string.format("midi:%s snd:%d", midi_status, d.midi_send_n),
+  row(43, string.format("midi:%s snd:%d", midi_status, d.midi_send_n),
         d.midi_ok and 10 or 15)
-  row(51, "vp:" .. (d.midi_devs ~= "" and d.midi_devs or "?"), 8)
-  row(58, d.frame_err ~= "" and ("!!"..d.frame_err) or "ok", d.frame_err ~= "" and 15 or 5)
+  row(51, d.frame_err ~= "" and ("!!"..d.frame_err) or "ok",
+        d.frame_err ~= "" and 15 or 5)
 end
 
 return UI
