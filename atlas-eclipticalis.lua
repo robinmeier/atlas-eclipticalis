@@ -5,7 +5,6 @@ engine.name = 'Atlas'
 
 local Stars = include 'lib/stars'
 local UI    = include 'lib/ui'
-local midi  = require 'midi'
 
 -- -------------------------------------------------------------------------
 -- State
@@ -26,13 +25,11 @@ local state = {
 
 local dbg = {
   fps = 0, dt = 0,
-  sky_n = 0, active_n = 0, visible_n = 0,
+  sky_n = 0, active_n = 0,
   trig_count = 0, trig_stage = 0,
   last_note = 0, last_freq = 0,
-  eng_ok = true,  eng_err  = "",
-  midi_name = "none", midi_ok = true, midi_err = "",
-  midi_send_n = 0,   -- how many note_on attempts
-  midi_devs   = "",  -- snapshot of vport names
+  eng_ok = true, eng_err = "",
+  midi_dev  = "none",
   frame_err = "",
 }
 state.dbg = dbg
@@ -42,7 +39,8 @@ local triggered        = {}
 local k_held           = {false, false, false}
 local k1_mod_used      = false
 local k2_mod_used      = false
-local midi_out
+local midi_device                -- norns midi vport object (like awake)
+local midi_channel     = 1       -- active midi channel
 local update_clock_id
 local note_off_metro
 local note_off_queue   = {}
@@ -50,56 +48,23 @@ local last_time        = 0
 local blink_acc        = 0
 
 -- -------------------------------------------------------------------------
--- Error helper: extract readable message from a Lua traceback string
+-- Error helper
 
 local function short_err(e)
   local s = tostring(e)
-  -- "file.lua:NN: message" -> grab just "message"
   return (s:match(":%d+: (.+)$") or s:sub(-36)):sub(1, 36)
 end
 
 -- -------------------------------------------------------------------------
--- Safe wrappers
+-- Audio engine wrapper (keep pcall here; engine loading is async)
 
 local function safe_engine_note(freq, amp, pan, sus, rel)
   if not engine.note then
-    dbg.eng_ok = false; dbg.eng_err = "cmd nil"
-    return
+    dbg.eng_ok = false; dbg.eng_err = "cmd nil"; return
   end
   local ok, err = pcall(function() engine.note(freq, amp, pan, sus, rel) end)
   dbg.eng_ok = ok
   if not ok then dbg.eng_err = short_err(err) end
-end
-
-local function safe_note_on(note, vel, ch)
-  dbg.midi_send_n = dbg.midi_send_n + 1
-  if not midi_out then
-    dbg.midi_ok = false; dbg.midi_err = "no device"; return
-  end
-  midi_out:note_on(note, vel, ch)
-  dbg.midi_ok = true
-end
-
-local function safe_note_off(note, ch)
-  if not midi_out then return end
-  midi_out:note_off(note, 0, ch)
-end
-
-local function scan_midi_devices()
-  local devs = {}
-  for i = 1, #midi.vports do
-    local nm = midi.vports[i].name or "?"
-    table.insert(devs, i..":"..nm)
-  end
-  dbg.midi_devs = #devs > 0 and table.concat(devs, " ") or "none"
-end
-
-local function connect_midi(n)
-  midi_out = midi.connect(n)
-  local nm = (midi_out.name ~= "" and midi_out.name) or "?"
-  dbg.midi_name = string.format("p%d:%s", n, nm)
-  dbg.midi_ok = true; dbg.midi_err = ""
-  scan_midi_devices()
 end
 
 -- -------------------------------------------------------------------------
@@ -111,7 +76,7 @@ local function init_note_off_metro()
     local keep = {}
     for _, ev in ipairs(note_off_queue) do
       if now >= ev.when then
-        safe_note_off(ev.note, ev.ch)
+        if midi_device then midi_device:note_off(ev.note, 0, ev.ch) end
       else
         table.insert(keep, ev)
       end
@@ -179,29 +144,26 @@ local function trigger_star(star)
   dbg.trig_stage = 5
 
   local out = params:get("out")
-  if out ~= 2 then safe_engine_note(freq, amp * vol, pan, 1.5, 2.0) end
+
+  -- Audio
+  if out == 1 or out == 3 then
+    safe_engine_note(freq, amp * vol, pan, 1.5, 2.0)
+  end
   dbg.trig_stage = 6
 
   dbg.last_note = note
   dbg.last_freq = math.floor(freq)
   dbg.trig_stage = 7
 
-  if out >= 2 then
+  -- MIDI (exactly like awake)
+  if (out == 2 or out == 3) and midi_device then
     local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
-    dbg.trig_stage = 8
-    local ch  = params:get("midi_channel")
-    if type(ch) ~= "number" then ch = 1 end
-    dbg.trig_stage = 9
-    safe_note_on(note, vel, ch)
-    dbg.trig_stage = 10
-    schedule_note_off(note, ch, 1.5)
+    midi_device:note_on(note, vel, midi_channel)
+    schedule_note_off(note, midi_channel, 1.5)
   end
-  dbg.trig_stage = 11
+  dbg.trig_stage = 8
 end
 
--- Trigger stars within ±band px of playhead position px.
--- trigger_star is individually pcall-protected so one bad star can't
--- freeze the loop.
 local function trigger_at(px, band)
   local lo, hi = px - band, px + band
   for _, star in ipairs(sky) do
@@ -236,28 +198,16 @@ local function update_frame()
   if blink_acc >= 0.5 then
     blink_acc = blink_acc - 0.5
     state.blink = not state.blink
-    -- Prune stale flashes
     for id, t in pairs(state.flash_times) do
       if now - t > 1.0 then state.flash_times[id] = nil end
     end
-    -- Update visible star count
-    local v = 0
-    for _, s in ipairs(sky) do
-      if s.dice <= state.density then
-        local sx = screen_x(s)
-        if sx >= 0 and sx <= 127 then v = v + 1 end
-      end
-    end
-    dbg.visible_n = v
   end
 
   if state.mode == "auto" and state.playing then
     local speed = params:get("scan_speed")
     if type(speed) ~= "number" then speed = 24 end
-
     trigger_at(state.playhead_x, 1.5)
     state.playhead_x = state.playhead_x + speed * dt
-
     if state.playhead_x > 127 then
       state.pan_x = (state.pan_x + 128.0 / state.zoom) % Stars.FIELD_W
       state.playhead_x = 0
@@ -278,6 +228,13 @@ end
 function init()
   local t = os.date("*t")
 
+  -- Build MIDI device list from vports exactly like awake
+  local midi_out_devices = {}
+  for i = 1, #midi.vports do
+    local name = midi.vports[i].name
+    table.insert(midi_out_devices, i .. ": " .. name)
+  end
+
   params:add_separator("ATLAS ECLIPTICALIS")
   params:add_number("year",  "Year",      2000, 2100, t.year)
   params:add_number("month", "Month",     1,    12,   t.month)
@@ -291,9 +248,23 @@ function init()
   params:add_control("pitch_base",  "Pitch Base",  controlspec.new(24, 84, 'lin', 1,   48,  "midi"))
   params:add_control("pitch_range", "Pitch Range", controlspec.new(1,  48, 'lin', 1,   24,  "semi"))
   params:add_control("out_vol",     "Volume",      controlspec.new(0,   1, 'lin', 0.01, 0.7))
-  params:add_option("out", "Output", {"audio", "midi", "audio+midi"}, 1)
-  params:add_number("midi_channel", "MIDI Channel", 1, 16, 1)
-  params:add_number("midi_device",  "MIDI Device",  1, 16, 1)
+
+  -- Output mode exactly like awake
+  params:add{type="option", id="out", name="output",
+    options={"audio", "midi", "audio+midi"}, default=1}
+
+  -- MIDI device: option list from vports, action fires on params:bang (like awake)
+  params:add{type="option", id="midi_device", name="midi device",
+    options=midi_out_devices, default=1,
+    action=function(v)
+      midi_device = midi.connect(v)
+      dbg.midi_dev = midi_device.name
+    end}
+
+  -- MIDI channel: action keeps local var in sync (like awake)
+  params:add{type="number", id="midi_out_channel", name="midi channel",
+    min=1, max=16, default=1,
+    action=function(v) midi_channel = v end}
 
   local function sky_action() rebuild() end
   for _, p in ipairs({"year","month","day","hour","lat","lon"}) do
@@ -303,20 +274,6 @@ function init()
   Stars.load()
   params:read()
   params:bang()
-
-  connect_midi(params:get("midi_device"))
-  params:set_action("midi_device", function(v) connect_midi(v) end)
-  params:set_action("out", function(v)
-    if v >= 2 then connect_midi(params:get("midi_device")) end
-  end)
-
-  -- Reconnect when norns assigns a device to a vport after init
-  midi.add    = function(dev) connect_midi(params:get("midi_device")) end
-  midi.remove = function(dev)
-    if dev.port == params:get("midi_device") then
-      midi_out = nil; dbg.midi_ok = false; dbg.midi_err = "removed"
-    end
-  end
 
   local px, py = Stars.default_pan(
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
