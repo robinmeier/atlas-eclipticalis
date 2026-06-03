@@ -76,14 +76,13 @@ local function safe_note_on(note, vel, ch)
   if not midi_out then
     dbg.midi_ok = false; dbg.midi_err = "no device"; return
   end
-  local ok, err = pcall(function() midi_out:note_on(note, vel, ch) end)
-  dbg.midi_ok = ok
-  if not ok then dbg.midi_err = short_err(err) end
+  midi_out:note_on(note, vel, ch)
+  dbg.midi_ok = true
 end
 
 local function safe_note_off(note, ch)
   if not midi_out then return end
-  pcall(function() midi_out:note_off(note, 0, ch) end)
+  midi_out:note_off(note, 0, ch)
 end
 
 local function scan_midi_devices()
@@ -306,6 +305,14 @@ function init()
 
   connect_midi(params:get("midi_device"))
   params:set_action("midi_device", function(v) connect_midi(v) end)
+
+  -- Reconnect when norns assigns a device to a vport after init
+  midi.add    = function(dev) connect_midi(params:get("midi_device")) end
+  midi.remove = function(dev)
+    if dev.port == params:get("midi_device") then
+      midi_out = nil; dbg.midi_ok = false; dbg.midi_err = "removed"
+    end
+  end
 
   local px, py = Stars.default_pan(
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
