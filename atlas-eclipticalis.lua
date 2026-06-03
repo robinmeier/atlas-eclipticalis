@@ -11,59 +11,66 @@ local midi  = require 'midi'
 -- State
 
 local state = {
-  pan_x     = 0,
-  pan_y     = 200,
-  zoom      = 2.0,
-  mode      = "auto",    -- "auto" | "cursor"
-  playing   = false,
-  playhead_x = 0,
-  density   = 0.45,
-  blink     = false,
-  year = 2000, month = 1, day = 1,  -- overwritten in init
+  pan_x      = 0,
+  pan_y      = 200,
+  zoom       = 2.0,
+  mode       = "auto",    -- "auto" | "cursor"
+  playing    = false,
+  playhead_x = 0.0,       -- float screen x (0-127), auto mode
+  density    = 0.45,
+  blink      = false,
+  year = 2000, month = 1, day = 1,
+  flash_times = {},       -- [star.id] = util.time() of last trigger
 }
 
-local sky       = {}    -- visible stars from Stars.compute()
-local triggered = {}    -- ids triggered in current playhead pass
-local k_held    = {false, false, false}
+local sky              = {}
+local triggered        = {}   -- [star.id] = true, cleared each playhead pass
+local k_held           = {false, false, false}
 local k2_modifier_used = false
 local midi_out
-
-local update_metro
+local update_clock_id
+local note_off_clocks  = {}
+local last_time        = 0
+local blink_acc        = 0
 
 -- -------------------------------------------------------------------------
--- Sky rebuild
+-- Helpers
+
+-- Screen x of a star given current pan_x and zoom (circular wrap)
+local function screen_x(star)
+  local dvx = star.vx - state.pan_x
+  dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+  if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
+  return dvx * state.zoom
+end
 
 local function rebuild()
-  sky = Stars.compute()
+  sky       = Stars.compute()
   state.year  = params:get("year")
   state.month = params:get("month")
   state.day   = params:get("day")
   triggered   = {}
 end
 
--- -------------------------------------------------------------------------
--- Note triggering
-
-local function pitch_from_screen_y(sy)
+local function pitch_from_sy(sy)
   local t    = 1 - util.clamp(sy / 63, 0, 1)
   local note = math.floor(params:get("pitch_base") + t * params:get("pitch_range"))
   return util.midi_to_hz(note), note
 end
 
-local note_off_clocks = {}
+-- -------------------------------------------------------------------------
+-- Note triggering
 
 local function trigger_star(star)
-  local dvx  = star.vx - state.pan_x
-  dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
-  if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
-  local sx   = dvx * state.zoom
-  local sy   = (star.vy - state.pan_y) * state.zoom
-  local freq, note = pitch_from_screen_y(sy)
-  local amp  = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
-  local pan  = util.clamp((sx / 64) - 1, -1, 1)
-  local vol  = params:get("volume")
+  state.flash_times[star.id] = util.time()
 
-  engine.note(freq, amp * vol, pan, 1.5, 2.0)
+  local sx       = screen_x(star)
+  local sy       = (star.vy - state.pan_y) * state.zoom
+  local freq, note = pitch_from_sy(sy)
+  local amp      = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
+  local pan      = util.clamp((sx / 64) - 1, -1, 1)
+
+  engine.note(freq, amp * params:get("volume"), pan, 1.5, 2.0)
 
   if midi_out then
     local vel = math.floor(util.clamp(amp * 115 + 12, 1, 127))
@@ -77,41 +84,52 @@ local function trigger_star(star)
   end
 end
 
--- -------------------------------------------------------------------------
--- Update loop (30 fps)
+-- Scan sky for stars whose screen x lies in [lo, hi] and trigger them.
+-- Uses the current state.pan_x, so call after any pan changes.
+local function trigger_range(lo, hi)
+  for _, star in ipairs(sky) do
+    if star.dice <= state.density and not triggered[star.id] then
+      local sx = screen_x(star)
+      if sx >= lo and sx <= hi then
+        trigger_star(star)
+        triggered[star.id] = true
+      end
+    end
+  end
+end
 
-local blink_count = 0
+-- -------------------------------------------------------------------------
+-- Update loop — 60 fps, delta-time based via clock (not metro)
 
 local function update_frame()
-  blink_count = blink_count + 1
-  if blink_count >= 15 then
-    blink_count = 0
+  local now = util.time()
+  local dt  = math.min(now - last_time, 0.1)   -- cap to avoid huge jumps
+  last_time = now
+
+  -- Blink: toggle every 0.5 s
+  blink_acc = blink_acc + dt
+  if blink_acc >= 0.5 then
+    blink_acc = blink_acc - 0.5
     state.blink = not state.blink
+    -- Prune stale flash entries
+    for id, t in pairs(state.flash_times) do
+      if now - t > 1.0 then state.flash_times[id] = nil end
+    end
   end
 
   if state.mode == "auto" and state.playing then
-    local speed = params:get("scan_speed") / 30.0
-    state.playhead_x = state.playhead_x + speed
+    local prev_x = state.playhead_x
+    state.playhead_x = state.playhead_x + params:get("scan_speed") * dt
 
     if state.playhead_x > 127 then
-      state.pan_x = state.pan_x + 128.0 / state.zoom
-      state.pan_x = state.pan_x % Stars.FIELD_W
-      state.playhead_x = 0
+      -- Advance pan before clearing triggered so last few stars still fire
+      trigger_range(prev_x, 127)
+      state.pan_x = (state.pan_x + 128.0 / state.zoom) % Stars.FIELD_W
+      state.playhead_x = state.playhead_x - 128
       triggered = {}
-    end
-
-    -- Check stars near playhead
-    for _, star in ipairs(sky) do
-      if star.dice <= state.density and not triggered[star.id] then
-        local dvx = star.vx - state.pan_x
-        dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
-        if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
-        local sx = dvx * state.zoom
-        if math.abs(sx - state.playhead_x) < 1.5 then
-          trigger_star(star)
-          triggered[star.id] = true
-        end
-      end
+      trigger_range(0, state.playhead_x)
+    else
+      trigger_range(prev_x, state.playhead_x)
     end
   end
 
@@ -129,7 +147,6 @@ function init()
   local t = os.date("*t")
 
   params:add_separator("ATLAS ECLIPTICALIS")
-
   params:add_number("year",  "Year",      2000, 2100, t.year)
   params:add_number("month", "Month",     1,    12,   t.month)
   params:add_number("day",   "Day",       1,    31,   t.day)
@@ -145,7 +162,6 @@ function init()
   params:add_number("midi_channel", "MIDI Channel", 1, 16, 1)
   params:add_number("midi_device",  "MIDI Device",  1,  4, 1)
 
-  -- Rebuild sky when date/location changes
   local function sky_action() rebuild() end
   for _, p in ipairs({"year","month","day","hour","lat","lon"}) do
     params:set_action(p, sky_action)
@@ -168,28 +184,54 @@ function init()
 
   rebuild()
 
-  update_metro = metro.init(update_frame, 1/30, -1)
-  update_metro:start()
+  last_time = util.time()
+  update_clock_id = clock.run(function()
+    while true do
+      clock.sleep(1/60)
+      update_frame()
+    end
+  end)
 end
 
 function enc(n, d)
   if n == 1 then
     if k_held[1] then
       -- K1 held: pan vertically
-      state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom), 0, Stars.FIELD_H - 64)
+      state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom),
+                               0, Stars.FIELD_H - 64)
     else
-      -- Pan horizontally (sky wraps)
-      state.pan_x = state.pan_x + d * (3.0 / state.zoom)
-      state.pan_x = ((state.pan_x % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+      -- Pan horizontally
+      local old_pan_x = state.pan_x
+      state.pan_x = ((state.pan_x + d * (3.0 / state.zoom)) % Stars.FIELD_W
+                     + Stars.FIELD_W) % Stars.FIELD_W
+
+      if state.mode == "cursor" then
+        -- Trigger any star whose screen x crossed the cursor line (x=64)
+        -- as a result of this pan.  Compute sx before and after the pan.
+        for _, star in ipairs(sky) do
+          if star.dice <= state.density then
+            local dvx_old = star.vx - old_pan_x
+            dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+            if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
+            local sx_old = dvx_old * state.zoom
+
+            local sx_new = screen_x(star)   -- uses updated pan_x
+
+            local lo = math.min(sx_old, sx_new)
+            local hi = math.max(sx_old, sx_new)
+            if lo <= 64 and hi >= 64 then
+              trigger_star(star)
+            end
+          end
+        end
+      end
     end
 
   elseif n == 2 then
     if k_held[2] then
-      -- K2 held: change density
       k2_modifier_used = true
       state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
     else
-      -- Zoom
       local factor = d > 0 and 1.06 or (1 / 1.06)
       for _ = 1, math.abs(d) do
         state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
@@ -197,8 +239,7 @@ function enc(n, d)
     end
 
   elseif n == 3 then
-    local cur = params:get("pitch_range")
-    params:set("pitch_range", util.clamp(cur + d, 1, 48))
+    params:set("pitch_range", util.clamp(params:get("pitch_range") + d, 1, 48))
   end
 end
 
@@ -209,10 +250,9 @@ function key(n, z)
     if z == 1 then
       k2_modifier_used = false
     else
-      -- K2 release: toggle mode only if it wasn't used as a density modifier
       if not k2_modifier_used then
         if state.mode == "auto" then
-          state.mode = "cursor"
+          state.mode    = "cursor"
           state.playing = false
         else
           state.mode = "auto"
@@ -223,25 +263,16 @@ function key(n, z)
   elseif n == 3 and z == 1 then
     if state.mode == "auto" then
       state.playing = not state.playing
-      if state.playing then triggered = {} end
-    else
-      -- Cursor mode: trigger stars near screen centre
-      local cx, cy = 64, 32
-      for _, star in ipairs(sky) do
-        if star.dice <= state.density then
-          local sx = (star.vx - state.pan_x) * state.zoom
-          local sy = (star.vy - state.pan_y) * state.zoom
-          if math.abs(sx - cx) < 9 and math.abs(sy - cy) < 9 then
-            trigger_star(star)
-          end
-        end
+      if state.playing then
+        triggered = {}
+        last_time = util.time()
       end
     end
   end
 end
 
 function cleanup()
-  if update_metro then update_metro:stop() end
+  if update_clock_id then clock.cancel(update_clock_id) end
   for _, cid in ipairs(note_off_clocks) do
     clock.cancel(cid)
   end
