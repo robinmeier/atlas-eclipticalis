@@ -150,9 +150,8 @@ function UI.draw_debug(state)
         d.trig_count, d.trig_stage, d.last_note, d.last_freq))
   row(35, d.eng_ok and "eng:OK" or ("eng ERR:"..d.eng_err),
         d.eng_ok and 10 or 15)
-  local midi_status = d.midi_ok and d.midi_name or ("ERR:"..d.midi_err)
-  row(43, string.format("midi:%s snd:%d", midi_status, d.midi_send_n),
-        d.midi_ok and 10 or 15)
+  row(43, string.format("midi:%s out:%s", d.midi_dev,
+        ({"aud","mid","a+m"})[params:get("out") or 1] or "?"), 10)
   row(51, d.frame_err ~= "" and ("!!"..d.frame_err) or "ok",
         d.frame_err ~= "" and 15 or 5)
 end
