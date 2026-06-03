@@ -59,7 +59,11 @@ end
 -- Safe wrappers
 
 local function safe_engine_note(freq, amp, pan, sus, rel)
-  local ok, err = pcall(engine.note, freq, amp, pan, sus, rel)
+  if not engine.note then
+    dbg.eng_ok = false; dbg.eng_err = "cmd nil"
+    return
+  end
+  local ok, err = pcall(function() engine.note(freq, amp, pan, sus, rel) end)
   dbg.eng_ok = ok
   if not ok then dbg.eng_err = short_err(err) end
 end
@@ -156,7 +160,7 @@ local function trigger_star(star)
   if type(pr) ~= "number" then pr = 24 end
   local t    = 1 - util.clamp(sy / 63, 0, 1)
   local note = math.max(0, math.min(127, math.floor(pb + t * pr)))
-  local freq = util.midi_to_hz(note)
+  local freq = 440 * (2 ^ ((note - 69) / 12))
 
   local amp = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
   local pan = util.clamp((sx / 64) - 1, -1, 1)
