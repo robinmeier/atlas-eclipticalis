@@ -30,6 +30,8 @@ local dbg = {
   trig_count = 0, last_note = 0, last_freq = 0,
   eng_ok = true,  eng_err  = "",
   midi_name = "none", midi_ok = true, midi_err = "",
+  midi_send_n = 0,   -- how many note_on attempts
+  midi_devs   = "",  -- snapshot of connected device names
   frame_err = "",
 }
 state.dbg = dbg
@@ -69,6 +71,7 @@ local function safe_engine_note(freq, amp, pan, sus, rel)
 end
 
 local function safe_note_on(note, vel, ch)
+  dbg.midi_send_n = dbg.midi_send_n + 1
   if not midi_out then
     dbg.midi_ok = false; dbg.midi_err = "no device"; return
   end
@@ -82,6 +85,15 @@ local function safe_note_off(note, ch)
   pcall(function() midi_out:note_off(note, 0, ch) end)
 end
 
+local function scan_midi_devices()
+  local devs = {}
+  for _, d in pairs(midi.devices) do
+    local nm = (d.name and d.name ~= "" and d.name) or "?"
+    table.insert(devs, string.format("%d:%s", d.port or 0, nm))
+  end
+  dbg.midi_devs = #devs > 0 and table.concat(devs, " ") or "none"
+end
+
 local function connect_midi(n)
   local ok, dev = pcall(midi.connect, n)
   if ok and dev then
@@ -93,6 +105,7 @@ local function connect_midi(n)
     midi_out = nil; dbg.midi_ok = false
     dbg.midi_err = short_err(dev)
   end
+  scan_midi_devices()
 end
 
 -- -------------------------------------------------------------------------
