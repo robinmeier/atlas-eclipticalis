@@ -122,7 +122,39 @@ function UI.draw(sky_stars, state)
     screen.fill()
   end
 
+  if state.debug and state.dbg then
+    UI.draw_debug(state)
+  end
+
   screen.update()
+end
+
+-- On-screen diagnostics overlay (toggle with a short K1 tap)
+function UI.draw_debug(state)
+  local d = state.dbg
+
+  -- Dark backdrop strip so text is legible over stars
+  screen.level(0)
+  screen.rect(0, 14, 128, 44)
+  screen.fill()
+
+  screen.font_size(8)
+  local function line(y, s, lvl)
+    screen.level(lvl or 15)
+    screen.move(2, y)
+    screen.text(s)
+  end
+
+  line(22, string.format("play:%s  mode:%s  fps:%d",
+        state.playing and "ON" or "off", state.mode, d.fps))
+  line(30, string.format("ph:%.0f px:%.0f z:%.2f",
+        state.playhead_x, state.pan_x, state.zoom))
+  line(38, string.format("trig:%d  last n:%d f:%.0f",
+        d.trig_count, d.last_note, d.last_freq))
+  line(46, "eng:" .. (d.eng_ok and "OK" or ("ERR " .. d.eng_err)),
+        d.eng_ok and 15 or 15)
+  line(54, "midi:" .. (d.midi_ok and ("OK " .. d.midi_name)
+                                 or ("ERR " .. d.midi_err)))
 end
 
 return UI
