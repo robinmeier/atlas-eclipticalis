@@ -189,11 +189,14 @@ local function trigger_at(px, band)
     if star.dice <= state.density and not triggered[star.id] then
       local sx = screen_x(star)
       if sx >= lo and sx <= hi then
-        local ok, err = pcall(trigger_star, star)
-        if ok then
-          triggered[star.id] = true
-        else
-          dbg.frame_err = short_err(err)
+        local sy = (star.vy - state.pan_y) * state.zoom
+        if sy >= 0 and sy <= 63 then
+          local ok, err = pcall(trigger_star, star)
+          if ok then
+            triggered[star.id] = true
+          else
+            dbg.frame_err = short_err(err)
+          end
         end
       end
     end
@@ -284,6 +287,11 @@ function init()
   connect_midi(params:get("midi_device"))
   params:set_action("midi_device", function(v) connect_midi(v) end)
 
+  -- Reconnect if the device appears after init (common with USB MIDI)
+  midi.add = function(dev)
+    if dev.port == params:get("midi_device") then connect_midi(dev.port) end
+  end
+
   local px, py = Stars.default_pan(
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
     params:get("lat"), params:get("lon")
@@ -327,7 +335,10 @@ function enc(n, d)
             local lo = math.min(dvx_old * state.zoom, screen_x(star))
             local hi = math.max(dvx_old * state.zoom, screen_x(star))
             if lo <= 64 and hi >= 64 then
-              pcall(trigger_star, star)
+              local sy = (star.vy - state.pan_y) * state.zoom
+              if sy >= 0 and sy <= 63 then
+                pcall(trigger_star, star)
+              end
             end
           end
         end
