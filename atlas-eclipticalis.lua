@@ -1,5 +1,4 @@
 -- atlas eclipticalis
--- norns script inspired by john cage's atlas eclipticalis
 
 engine.name = 'Atlas'
 
@@ -12,13 +11,13 @@ local UI    = include 'lib/ui'
 local state = {
   pan_x      = 0,
   pan_y      = 200,
-  zoom       = 2.0,
+  zoom       = 1.0,
   mode       = "auto",
   playing    = false,
   playhead_x = 0.0,
-  density    = 0.45,
+  density    = 0.80,
   blink      = false,
-  debug      = true,
+  debug      = false,
   year = 2000, month = 1, day = 1,
   flash_times = {},
   startup    = true,
@@ -257,7 +256,7 @@ function init()
 
   -- Output mode exactly like awake
   params:add{type="option", id="out", name="output",
-    options={"audio", "midi", "audio+midi"}, default=1}
+    options={"audio", "midi", "audio+midi"}, default=3}
 
   -- MIDI device: option list from vports, action fires on params:bang (like awake)
   params:add{type="option", id="midi_device", name="midi device",
