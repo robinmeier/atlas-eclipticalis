@@ -128,12 +128,26 @@ function UI.draw(sky_stars, state)
   -- HUD
   screen.font_size(8)
   screen.level(4)
+
+  -- Date top-left
   screen.move(2, 7)
   screen.text(string.format("%04d-%02d-%02d", state.year, state.month, state.day))
-  screen.move(80, 62)
-  screen.text(string.format("%s  %d%%",
-    state.mode == "auto" and "AUTO" or "CURS",
-    math.floor(state.density * 100)))
+
+  -- Time top-right (right-aligned); advances with E2 pan
+  local h = math.floor(state.disp_hour)
+  local m = math.floor((state.disp_hour - h) * 60)
+  local time_str = string.format("%02d:%02d", h, m)
+  local tw = screen.text_extents(time_str)
+  screen.move(126 - tw, 7)
+  screen.text(time_str)
+
+  -- Lat/density bottom-left
+  local lat = math.floor(util.clamp(90 - (state.pan_y + 32 / state.zoom) / 4, -90, 90) + 0.5)
+  local lon = params:get("lon") or 0
+  local lat_str = string.format("%d°%s", math.abs(lat), lat >= 0 and "N" or "S")
+  local lon_str = string.format("%d°%s", math.abs(lon), lon >= 0 and "E" or "W")
+  screen.move(2, 62)
+  screen.text(string.format("%s %s  %d%%", lat_str, lon_str, math.floor(state.density * 100)))
 
   -- Blinking play dot (top-right)
   if state.mode == "auto" and state.playing then
