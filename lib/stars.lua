@@ -305,6 +305,9 @@ function Stars.load()
       brightness = 0.03 + math.random() * 0.13,
       dice       = math.random(),
       is_bg      = true,
+      -- parallax factor: far bg stars pan slightly slower than named stars.
+      -- deterministic hash so dice sequence above is unchanged.
+      par        = 0.82 + ((i * 73 + math.floor(ra * 31)) % 150) / 1000.0,
     })
   end
 end
@@ -324,6 +327,66 @@ function Stars.default_pan(year, month, day, hour, lat, lon)
   local pan_x  = ((lst * 100 - 64) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
   local pan_y  = math.max(0, math.min(Stars.FIELD_H - 64, (90 - lat) * 4 - 32))
   return pan_x, pan_y
+end
+
+-- Constellation line segments {vx1,vy1, vx2,vy2} for 7 constellations.
+-- Uses named-star RA/Dec so these are always par=1.0 positions.
+-- Drawn by UI when zoom <= 1.5.
+do
+  local function c(r1,d1, r2,d2)
+    return {(r1*100)%2400, (90-d1)*4, (r2*100)%2400, (90-d2)*4}
+  end
+  Stars.CONST_LINES = {
+    -- ── Orion ─────────────────────────────────────────────────────
+    c( 5.5883, 9.9342,  5.9195, 7.4069),  -- Meissa   – Betelgeuse
+    c( 5.9195, 7.4069,  5.4188, 6.3497),  -- Betelgeuse – Bellatrix
+    c( 5.9195, 7.4069,  5.5335,-0.2991),  -- Betelgeuse – Mintaka
+    c( 5.4188, 6.3497,  5.6792,-1.9428),  -- Bellatrix – Alnitak
+    c( 5.5335,-0.2991,  5.6036,-1.2019),  -- Mintaka  – Alnilam
+    c( 5.6036,-1.2019,  5.6792,-1.9428),  -- Alnilam  – Alnitak
+    c( 5.6792,-1.9428,  5.2432,-8.2016),  -- Alnitak  – Rigel
+    c( 5.5335,-0.2991,  5.7954,-9.6697),  -- Mintaka  – Saiph
+    c( 5.2432,-8.2016,  5.7954,-9.6697),  -- Rigel    – Saiph
+    -- ── Ursa Major ────────────────────────────────────────────────
+    c(11.0621,61.7509, 11.0307,56.3824),  -- Dubhe  – Merak
+    c(11.0307,56.3824, 11.8977,53.6948),  -- Merak  – Phecda
+    c(11.8977,53.6948, 12.2571,57.0326),  -- Phecda – Megrez
+    c(12.2571,57.0326, 11.0621,61.7509),  -- Megrez – Dubhe (close bowl)
+    c(12.2571,57.0326, 12.9005,55.9598),  -- Megrez – Alioth
+    c(12.9005,55.9598, 13.3988,54.9254),  -- Alioth – Mizar
+    c(13.3988,54.9254, 13.7923,49.3133),  -- Mizar  – Alkaid
+    -- ── Cassiopeia ────────────────────────────────────────────────
+    c( 0.1530,59.1498,  0.6752,56.5373),  -- Caph    – Schedar
+    c( 0.6752,56.5373,  0.9453,60.7167),  -- Schedar – Gamma Cas
+    c( 0.9453,60.7167,  1.4304,60.2353),  -- Gamma   – Ruchbah
+    c( 1.4304,60.2353,  1.9073,63.6701),  -- Ruchbah – Segin
+    -- ── Scorpius ──────────────────────────────────────────────────
+    c(15.9809,-26.1142, 16.0053,-22.6217),  -- Pi     – Dschubba
+    c(16.0879,-19.8054, 16.0053,-22.6217),  -- Grafias– Dschubba
+    c(16.0053,-22.6217, 16.4901,-26.4320),  -- Dschubba–Antares
+    c(16.4901,-26.4320, 16.3527,-25.5924),  -- Antares– Tau Sco
+    c(16.3527,-25.5924, 16.8357,-34.2931),  -- Tau    – Epsilon
+    c(16.8357,-34.2931, 17.7081,-39.0302),  -- Epsilon– Eta
+    c(17.7081,-39.0302, 17.5600,-37.1032),  -- Eta    – Shaula
+    c(17.5600,-37.1032, 17.6222,-42.9979),  -- Shaula – Sargas
+    -- ── Leo ───────────────────────────────────────────────────────
+    c(10.1228,16.7625, 10.3328,19.8417),  -- Eta Leo– Algieba
+    c(10.3328,19.8417, 10.1395,11.9672),  -- Algieba– Regulus
+    c(10.1395,11.9672, 10.1228,16.7625),  -- Regulus– Eta Leo (close sickle)
+    c(10.3328,19.8417, 11.2352,20.5238),  -- Algieba– Zosma
+    c(11.2352,20.5238, 11.8181,14.5720),  -- Zosma  – Denebola
+    c(11.2352,20.5238, 11.2350,15.4297),  -- Zosma  – Chertan
+    c(11.2350,15.4297, 10.8228, 6.0292),  -- Chertan– Chort
+    -- ── Cygnus ────────────────────────────────────────────────────
+    c(20.6905,45.2803, 20.3703,40.2567),  -- Deneb      – Sadr
+    c(20.3703,40.2567, 19.5121,27.9597),  -- Sadr       – Albireo
+    c(20.7704,33.9703, 20.3703,40.2567),  -- Gienah Cyg – Sadr
+    c(20.3703,40.2567, 19.7496,45.1303),  -- Sadr       – Delta Cyg
+    c(20.9270,41.1673, 20.7704,33.9703),  -- Epsilon    – Gienah
+    -- ── Crux ──────────────────────────────────────────────────────
+    c(12.5194,-57.1132, 12.4433,-63.0991),  -- Gacrux – Acrux (vertical)
+    c(12.7952,-59.6889, 12.3527,-58.7489),  -- Mimosa – Delta Cru (horizontal)
+  }
 end
 
 return Stars

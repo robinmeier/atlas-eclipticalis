@@ -95,7 +95,7 @@ end
 -- Helpers
 
 local function screen_x(star)
-  local dvx = star.vx - state.pan_x
+  local dvx = star.vx - state.pan_x * (star.par or 1.0)
   dvx = ((dvx % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
   if dvx > Stars.FIELD_W / 2 then dvx = dvx - Stars.FIELD_W end
   return dvx * state.zoom
@@ -278,6 +278,7 @@ function init()
   end
 
   Stars.load()
+  state.const_lines = Stars.CONST_LINES
   params:read()
   params:bang()
 
@@ -332,7 +333,7 @@ function enc(n, d)
           if star.dice <= state.density then
             local sx_new = screen_x(star)
             if sx_new >= -2 and sx_new <= 129 then
-              local dvx_old = star.vx - old_pan_x
+              local dvx_old = star.vx - old_pan_x * (star.par or 1.0)
               dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
               if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
               local lo = math.min(dvx_old * state.zoom, sx_new)
