@@ -129,6 +129,116 @@ function UI.draw(sky_stars, state)
   screen.update()
 end
 
+-- ── Startup screen (option A) ────────────────────────────────────────────
+-- Orion constellation fills upper 2/3; separator; title + subtitle below.
+-- Stars twinkle independently via per-star sine oscillators.
+
+-- {screen_x, screen_y, mag, twinkle_hz, twinkle_phase, twinkle_amp}
+local _ORI = {
+  {48,  8, 0.4, 0.71, 0.00, 2.0},   -- Betelgeuse  (bright, top-left)
+  {71, 10, 1.6, 0.53, 1.33, 1.0},   -- Bellatrix
+  {54, 20, 2.2, 0.37, 2.09, 0.8},   -- Mintaka     (belt)
+  {60, 22, 1.7, 0.61, 0.84, 1.0},   -- Alnilam     (belt)
+  {67, 20, 1.8, 0.29, 3.01, 0.8},   -- Alnitak     (belt)
+  {73, 33, 0.1, 0.89, 1.74, 2.5},   -- Rigel       (brightest, bottom-right)
+  {50, 33, 2.0, 0.47, 2.51, 0.8},   -- Saiph
+}
+-- connecting lines (1-based index pairs)
+local _ORI_L = {{1,2},{1,3},{2,5},{3,4},{4,5},{5,6},{3,7}}
+
+-- background scatter: {x, y, mag, twinkle_hz, twinkle_phase}
+local _BG = {
+  {  8,  4,3.8,0.18,0.10},{ 22,  9,4.2,0.13,1.51},{102,  3,3.6,0.21,0.77},
+  {121, 14,4.1,0.16,2.33},{  4, 29,4.5,0.11,1.22},{ 16, 47,3.9,0.19,3.01},
+  {119, 41,4.2,0.14,0.55},{111, 57,3.6,0.22,2.10},{ 36, 56,4.5,0.10,1.80},
+  { 91, 59,4.1,0.17,0.33},{101, 33,4.5,0.12,2.88},{ 21, 58,4.3,0.20,1.05},
+  { 81, 53,4.5,0.15,3.14},{ 28, 37,4.8,0.11,0.72},{116, 51,4.1,0.18,1.95},
+  { 41,  4,4.6,0.13,2.40},{ 96, 17,4.1,0.16,0.18},{  6, 59,4.5,0.12,3.00},
+  { 77,  6,4.3,0.19,1.66},{ 31, 21,4.9,0.10,0.93},{126, 29,4.0,0.14,2.21},
+  { 86, 39,4.7,0.17,0.45},{ 13, 36,4.6,0.11,1.38},{106, 23,4.3,0.15,2.75},
+  { 60,  3,4.4,0.20,0.60},{ 14, 15,4.8,0.13,1.88},{122, 58,4.2,0.16,3.08},
+  { 50, 57,4.6,0.12,0.27},
+}
+
+local function _twinkle_lv(base_lv, hz, phase, amp, now)
+  local tw = math.sin(now * hz * math.pi * 2 + phase) * amp
+  return math.max(1, math.min(15, math.floor(base_lv + tw + 0.5)))
+end
+
+local function _place_star(x, y, lv)
+  screen.level(lv)
+  screen.pixel(x, y)
+  screen.fill()
+end
+
+function UI.draw_startup()
+  screen.clear()
+  local now = util.time()
+
+  -- dim scatter with very gentle twinkle
+  for _, s in ipairs(_BG) do
+    local base = math.max(1, math.floor(15 - s[3] * 2.0))
+    local lv   = _twinkle_lv(base, s[4], s[5], 0.5, now)
+    _place_star(s[1], s[2], lv)
+  end
+
+  -- constellation lines (dim, drawn before stars so stars sit on top)
+  screen.level(3)
+  for _, ln in ipairs(_ORI_L) do
+    local a, b = _ORI[ln[1]], _ORI[ln[2]]
+    screen.move(a[1], a[2])
+    screen.line(b[1], b[2])
+    screen.stroke()
+  end
+
+  -- constellation stars with per-star twinkling
+  for _, s in ipairs(_ORI) do
+    local x, y, mag, hz, phase, amp = s[1], s[2], s[3], s[4], s[5], s[6]
+    local base = math.max(2, math.floor(15 - mag * 2.0))
+    local lv   = _twinkle_lv(base, hz, phase, amp, now)
+    -- halo for bright stars
+    if lv >= 9 then
+      screen.level(math.max(1, lv - 9))
+      for _, d in ipairs({{-1,0},{1,0},{0,-1},{0,1}}) do
+        screen.pixel(x+d[1], y+d[2]); screen.fill()
+      end
+    end
+    -- 2×2 core for Rigel (mag < 0.5)
+    screen.level(lv)
+    if mag < 0.5 then
+      screen.rect(x, y, 2, 2)
+    else
+      screen.pixel(x, y)
+    end
+    screen.fill()
+  end
+
+  -- separator
+  screen.level(3)
+  screen.move(18, 42); screen.line(110, 42); screen.stroke()
+
+  -- title
+  screen.font_size(8)
+  screen.level(15)
+  local tw = screen.text_extents("ATLAS ECLIPTICALIS")
+  screen.move(math.floor((128 - tw) / 2), 51)
+  screen.text("ATLAS ECLIPTICALIS")
+
+  -- subtitle
+  screen.font_size(6)
+  screen.level(4)
+  tw = screen.text_extents("an astronomical music box")
+  screen.move(math.floor((128 - tw) / 2), 57)
+  screen.text("an astronomical music box")
+
+  screen.level(3)
+  tw = screen.text_extents("for norns  *  John Cage")
+  screen.move(math.floor((128 - tw) / 2), 63)
+  screen.text("for norns  *  John Cage")
+
+  screen.update()
+end
+
 -- On-screen diagnostics overlay (toggle with a short K1 tap)
 function UI.draw_debug(state)
   local d = state.dbg

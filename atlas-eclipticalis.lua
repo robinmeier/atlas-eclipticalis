@@ -21,6 +21,7 @@ local state = {
   debug      = true,
   year = 2000, month = 1, day = 1,
   flash_times = {},
+  startup    = true,
 }
 
 local dbg = {
@@ -194,6 +195,11 @@ local function update_frame()
   dbg.dt = math.floor(dt * 1000)
   if dt > 0 then dbg.fps = math.floor(1/dt + 0.5) end
 
+  if state.startup then
+    UI.draw_startup()
+    return
+  end
+
   blink_acc = blink_acc + dt
   if blink_acc >= 0.5 then
     blink_acc = blink_acc - 0.5
@@ -299,6 +305,7 @@ function init()
 end
 
 function enc(n, d)
+  if state.startup then return end
   if n == 1 then
     -- Zoom, anchored to screen center so the view doesn't drift
     local factor = d > 0 and 1.06 or (1 / 1.06)
@@ -349,7 +356,13 @@ function enc(n, d)
   end
 end
 
+
 function key(n, z)
+  if state.startup and z == 1 then
+    state.startup = false
+    return
+  end
+
   k_held[n] = (z == 1)
 
   if n == 1 then
