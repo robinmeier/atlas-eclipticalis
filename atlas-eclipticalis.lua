@@ -2,8 +2,9 @@
 
 engine.name = 'Atlas'
 
-local Stars = include 'lib/stars'
-local UI    = include 'lib/ui'
+local Stars     = include 'lib/stars'
+local UI        = include 'lib/ui'
+local MusicUtil = require 'musicutil'
 
 -- -------------------------------------------------------------------------
 -- State
@@ -134,7 +135,7 @@ local function trigger_star(star)
   if type(pr) ~= "number" then pr = 24 end
   local t    = 1 - util.clamp(sy / 63, 0, 1)
   local note = math.max(0, math.min(127, math.floor(pb + t * pr)))
-  local freq = 440 * (2 ^ ((note - 69) / 12))
+  local freq = MusicUtil.note_num_to_freq(note)
   dbg.trig_stage = 4
 
   local amp = util.clamp(0.2 + star.brightness * 0.65, 0.05, 0.9)
