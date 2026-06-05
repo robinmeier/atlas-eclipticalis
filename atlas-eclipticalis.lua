@@ -300,11 +300,22 @@ end
 
 function enc(n, d)
   if n == 1 then
-    if k_held[1] then
-      k1_mod_used = true
-      state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom),
-                               0, Stars.FIELD_H - 64)
+    -- Zoom, anchored to screen center so the view doesn't drift
+    local factor = d > 0 and 1.06 or (1 / 1.06)
+    local vx_c = state.pan_x + 64 / state.zoom
+    local vy_c = state.pan_y + 32 / state.zoom
+    for _ = 1, math.abs(d) do
+      state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
+    end
+    state.pan_x = ((vx_c - 64 / state.zoom) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
+    state.pan_y = util.clamp(vy_c - 32 / state.zoom, 0, Stars.FIELD_H - 64)
+
+  elseif n == 2 then
+    if k_held[2] then
+      k2_mod_used = true
+      state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
     else
+      -- Horizontal pan; in cursor mode trigger stars that cross x=64
       local old_pan_x = state.pan_x
       state.pan_x = ((state.pan_x + d * (3.0 / state.zoom)) % Stars.FIELD_W
                      + Stars.FIELD_W) % Stars.FIELD_W
@@ -312,15 +323,18 @@ function enc(n, d)
       if state.mode == "cursor" then
         for _, star in ipairs(sky) do
           if star.dice <= state.density then
-            local dvx_old = star.vx - old_pan_x
-            dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
-            if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
-            local lo = math.min(dvx_old * state.zoom, screen_x(star))
-            local hi = math.max(dvx_old * state.zoom, screen_x(star))
-            if lo <= 64 and hi >= 64 then
-              local sy = (star.vy - state.pan_y) * state.zoom
-              if sy >= 0 and sy <= 63 then
-                pcall(trigger_star, star)
+            local sx_new = screen_x(star)
+            if sx_new >= -2 and sx_new <= 129 then
+              local dvx_old = star.vx - old_pan_x
+              dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+              if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
+              local lo = math.min(dvx_old * state.zoom, sx_new)
+              local hi = math.max(dvx_old * state.zoom, sx_new)
+              if lo <= 64 and hi >= 64 then
+                local sy = (star.vy - state.pan_y) * state.zoom
+                if sy >= 0 and sy <= 63 then
+                  pcall(trigger_star, star)
+                end
               end
             end
           end
@@ -328,19 +342,10 @@ function enc(n, d)
       end
     end
 
-  elseif n == 2 then
-    if k_held[2] then
-      k2_mod_used = true
-      state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
-    else
-      local factor = d > 0 and 1.06 or (1 / 1.06)
-      for _ = 1, math.abs(d) do
-        state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
-      end
-    end
-
   elseif n == 3 then
-    params:set("pitch_range", util.clamp(params:get("pitch_range") + d, 1, 48))
+    -- Vertical pan
+    state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom),
+                             0, Stars.FIELD_H - 64)
   end
 end
 
