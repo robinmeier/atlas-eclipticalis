@@ -241,20 +241,15 @@ function UI.draw_startup()
   screen.font_size(8)
   screen.level(15)
   local tw = screen.text_extents("ATLAS ECLIPTICALIS")
-  screen.move(math.floor((128 - tw) / 2), 51)
+  screen.move(math.floor((128 - tw) / 2), 50)
   screen.text("ATLAS ECLIPTICALIS")
 
-  -- subtitle
-  screen.font_size(6)
-  screen.level(4)
+  -- subtitle (font_size 8 but dim — larger than before for readability)
+  screen.font_size(8)
+  screen.level(5)
   tw = screen.text_extents("an astronomical music box")
-  screen.move(math.floor((128 - tw) / 2), 57)
+  screen.move(math.floor((128 - tw) / 2), 61)
   screen.text("an astronomical music box")
-
-  screen.level(3)
-  tw = screen.text_extents("for norns  *  John Cage")
-  screen.move(math.floor((128 - tw) / 2), 63)
-  screen.text("for norns  *  John Cage")
 
   screen.update()
 end
