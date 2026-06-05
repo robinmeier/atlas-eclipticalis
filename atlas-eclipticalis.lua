@@ -312,15 +312,23 @@ function enc(n, d)
       if state.mode == "cursor" then
         for _, star in ipairs(sky) do
           if star.dice <= state.density then
-            local dvx_old = star.vx - old_pan_x
-            dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
-            if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
-            local lo = math.min(dvx_old * state.zoom, screen_x(star))
-            local hi = math.max(dvx_old * state.zoom, screen_x(star))
-            if lo <= 64 and hi >= 64 then
-              local sy = (star.vy - state.pan_y) * state.zoom
-              if sy >= 0 and sy <= 63 then
-                pcall(trigger_star, star)
+            local sx_new = screen_x(star)
+            -- Visibility gate: skip stars not currently on screen.
+            -- Without this, wrap-around in the circular field causes a star's
+            -- "old" position to be on the opposite extreme from its "new"
+            -- position (e.g. +1199 → -1199 virtual px), making the sweep
+            -- range span the entire field and spuriously include x=64.
+            if sx_new >= -2 and sx_new <= 129 then
+              local dvx_old = star.vx - old_pan_x
+              dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+              if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
+              local lo = math.min(dvx_old * state.zoom, sx_new)
+              local hi = math.max(dvx_old * state.zoom, sx_new)
+              if lo <= 64 and hi >= 64 then
+                local sy = (star.vy - state.pan_y) * state.zoom
+                if sy >= 0 and sy <= 63 then
+                  pcall(trigger_star, star)
+                end
               end
             end
           end
