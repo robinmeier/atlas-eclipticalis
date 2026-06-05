@@ -20,6 +20,7 @@ local state = {
   blink      = false,
   debug      = false,
   year = 2000, month = 1, day = 1,
+  disp_hour  = 0.0,   -- fractional hour 0-24, updated by E2 panning
   flash_times = {},
   startup    = true,
 }
@@ -103,9 +104,10 @@ end
 
 local function rebuild()
   sky = Stars.compute()
-  state.year  = params:get("year")
-  state.month = params:get("month")
-  state.day   = params:get("day")
+  state.year      = params:get("year")
+  state.month     = params:get("month")
+  state.day       = params:get("day")
+  state.disp_hour = params:get("hour")
   triggered   = {}
   dbg.sky_n   = #sky
   local a = 0
@@ -286,8 +288,9 @@ function init()
     params:get("year"), params:get("month"), params:get("day"), params:get("hour"),
     params:get("lat"), params:get("lon")
   )
-  state.pan_x = px
-  state.pan_y = py
+  state.pan_x      = px
+  state.pan_y      = py
+  state.disp_hour  = params:get("hour")
 
   rebuild()
   init_note_off_metro()
@@ -323,10 +326,11 @@ function enc(n, d)
       k2_mod_used = true
       state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
     else
-      -- Horizontal pan; in cursor mode trigger stars that cross x=64
+      -- Horizontal pan; advancing/rewinding the night (100 vx = 1 RA hour)
       local old_pan_x = state.pan_x
       state.pan_x = ((state.pan_x + d * (3.0 / state.zoom)) % Stars.FIELD_W
                      + Stars.FIELD_W) % Stars.FIELD_W
+      state.disp_hour = (state.disp_hour + d * 0.03 / state.zoom + 24) % 24
 
       if state.mode == "cursor" then
         for _, star in ipairs(sky) do
