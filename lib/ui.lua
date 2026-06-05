@@ -27,10 +27,30 @@ function UI.draw(sky_stars, state)
 
   local now = util.time()
 
+  -- Constellation lines (beneath stars, only when zoomed out)
+  if state.zoom <= 1.5 and state.const_lines then
+    local function clsx(vx)
+      local dvx = vx - state.pan_x   -- named stars: par = 1.0
+      dvx = ((dvx % 2400) + 2400) % 2400
+      if dvx > 1200 then dvx = dvx - 2400 end
+      return dvx * state.zoom
+    end
+    local function clsy(vy) return (vy - state.pan_y) * state.zoom end
+    screen.level(3)
+    for _, ln in ipairs(state.const_lines) do
+      local x1, y1 = clsx(ln[1]), clsy(ln[2])
+      local x2, y2 = clsx(ln[3]), clsy(ln[4])
+      if (x1 >= -32 and x1 <= 159 and y1 >= -32 and y1 <= 95) or
+         (x2 >= -32 and x2 <= 159 and y2 >= -32 and y2 <= 95) then
+        screen.move(x1, y1); screen.line(x2, y2); screen.stroke()
+      end
+    end
+  end
+
   -- Stars
   for _, star in ipairs(sky_stars) do
     if star.dice <= state.density then
-      local dvx = star.vx - state.pan_x
+      local dvx = star.vx - state.pan_x * (star.par or 1.0)
       dvx = ((dvx % 2400) + 2400) % 2400
       if dvx > 1200 then dvx = dvx - 2400 end
       local sx = math.floor(dvx * state.zoom + 0.5)
