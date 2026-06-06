@@ -1,5 +1,3 @@
--- atlas eclipticalis
-
 engine.name = 'Atlas'
 
 local Stars     = include 'lib/stars'
