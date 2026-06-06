@@ -93,6 +93,25 @@ local function screen_x(star)
   return dvx * state.zoom
 end
 
+-- Calendar helpers for date-aware hour wrapping
+local _DIM = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+local function leap(y) return (y%4==0 and y%100~=0) or y%400==0 end
+local function dim(m, y) return (m==2 and leap(y)) and 29 or _DIM[m] end
+
+local function advance_date(days)
+  local d, m, y = state.day + days, state.month, state.year
+  while d > dim(m, y) do d = d - dim(m, y); m = m + 1; if m > 12 then m=1; y=y+1 end end
+  while d < 1     do m = m - 1; if m < 1 then m=12; y=y-1 end; d = d + dim(m, y) end
+  state.day, state.month, state.year = d, m, y
+end
+
+local function advance_hours(delta)
+  local h = state.disp_hour + delta
+  local days = math.floor(h / 24)
+  state.disp_hour = h - days * 24
+  if days ~= 0 then advance_date(days) end
+end
+
 local function rebuild()
   sky = Stars.compute()
   state.year      = params:get("year")
@@ -182,7 +201,7 @@ local function update_frame()
     local dx        = state.scan_speed * dt
     local old_pan_x = state.pan_x
     state.pan_x     = ((state.pan_x + dx) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
-    state.disp_hour = (state.disp_hour + dx / 100 + 24) % 24
+    advance_hours(dx / 100)
 
     for _, star in ipairs(sky) do
       if star.dice <= state.density then
@@ -323,7 +342,7 @@ function enc(n, d)
       local old_pan_x = state.pan_x
       state.pan_x = ((state.pan_x + d * (3.0 / state.zoom)) % Stars.FIELD_W
                      + Stars.FIELD_W) % Stars.FIELD_W
-      state.disp_hour = (state.disp_hour + d * 0.03 / state.zoom + 24) % 24
+      advance_hours(d * 0.03 / state.zoom)
 
       for _, star in ipairs(sky) do
         if star.dice <= state.density then
