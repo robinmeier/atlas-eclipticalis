@@ -110,20 +110,11 @@ function UI.draw(sky_stars, state)
     screen.stroke()
   end
 
-  -- Playhead (auto) — sweeping line
-  -- Cursor (manual) — fixed line at x=64, slightly dimmer
-  if state.mode == "auto" then
-    local px = math.floor(state.playhead_x + 0.5)
-    screen.level(15)
-    screen.move(px, 0)
-    screen.line(px, 63)
-    screen.stroke()
-  else
-    screen.level(10)
-    screen.move(64, 0)
-    screen.line(64, 63)
-    screen.stroke()
-  end
+  -- Cursor line: bright in scan mode (stars auto-glide past), dim in cursor mode
+  screen.level(state.mode == "scan" and 15 or 8)
+  screen.move(64, 0)
+  screen.line(64, 63)
+  screen.stroke()
 
   -- HUD
   screen.font_size(8)
@@ -148,17 +139,6 @@ function UI.draw(sky_stars, state)
   local lon_str = string.format("%d°%s", math.abs(lon), lon >= 0 and "E" or "W")
   screen.move(2, 62)
   screen.text(string.format("%s %s  %d%%", lat_str, lon_str, math.floor(state.density * 100)))
-
-  -- Blinking play dot (top-right)
-  if state.mode == "auto" and state.playing then
-    screen.level(state.blink and 12 or 3)
-    screen.circle(127, 3, 2)
-    screen.fill()
-  end
-
-  if state.debug and state.dbg then
-    UI.draw_debug(state)
-  end
 
   screen.update()
 end

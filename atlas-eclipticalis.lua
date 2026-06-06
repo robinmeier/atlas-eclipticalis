@@ -1,5 +1,3 @@
--- atlas eclipticalis
-
 engine.name = 'Atlas'
 
 local Stars     = include 'lib/stars'
@@ -13,14 +11,11 @@ local state = {
   pan_x      = 0,
   pan_y      = 200,
   zoom       = 1.0,
-  mode       = "auto",
-  playing    = false,
-  playhead_x = 0.0,
+  mode       = "cursor",   -- "cursor" | "scan"
+  scan_speed = 0,          -- signed vx/s; E2 in scan mode; 0 = stopped
   density    = 0.80,
-  blink      = false,
-  debug      = false,
   year = 2000, month = 1, day = 1,
-  disp_hour  = 0.0,   -- fractional hour 0-24, updated by E2 panning
+  disp_hour  = 0.0,
   flash_times = {},
   startup    = true,
 }
@@ -37,17 +32,13 @@ local dbg = {
 state.dbg = dbg
 
 local sky              = {}
-local triggered        = {}
 local k_held           = {false, false, false}
-local k1_mod_used      = false
-local k2_mod_used      = false
 local midi_device                -- norns midi vport object (like awake)
 local midi_channel     = 1       -- active midi channel
 local update_clock_id
 local note_off_metro
 local note_off_queue   = {}
 local last_time        = 0
-local blink_acc        = 0
 
 -- -------------------------------------------------------------------------
 -- Error helper
@@ -102,13 +93,31 @@ local function screen_x(star)
   return dvx * state.zoom
 end
 
+-- Calendar helpers for date-aware hour wrapping
+local _DIM = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+local function leap(y) return (y%4==0 and y%100~=0) or y%400==0 end
+local function dim(m, y) return (m==2 and leap(y)) and 29 or _DIM[m] end
+
+local function advance_date(days)
+  local d, m, y = state.day + days, state.month, state.year
+  while d > dim(m, y) do d = d - dim(m, y); m = m + 1; if m > 12 then m=1; y=y+1 end end
+  while d < 1     do m = m - 1; if m < 1 then m=12; y=y-1 end; d = d + dim(m, y) end
+  state.day, state.month, state.year = d, m, y
+end
+
+local function advance_hours(delta)
+  local h = state.disp_hour + delta
+  local days = math.floor(h / 24)
+  state.disp_hour = h - days * 24
+  if days ~= 0 then advance_date(days) end
+end
+
 local function rebuild()
   sky = Stars.compute()
   state.year      = params:get("year")
   state.month     = params:get("month")
   state.day       = params:get("day")
   state.disp_hour = params:get("hour")
-  triggered   = {}
   dbg.sky_n   = #sky
   local a = 0
   for _, s in ipairs(sky) do
@@ -167,26 +176,6 @@ local function trigger_star(star)
   dbg.trig_stage = 8
 end
 
-local function trigger_at(px, band)
-  local lo, hi = px - band, px + band
-  for _, star in ipairs(sky) do
-    if star.dice <= state.density and not triggered[star.id] then
-      local sx = screen_x(star)
-      if sx >= lo and sx <= hi then
-        local sy = (star.vy - state.pan_y) * state.zoom
-        if sy >= 0 and sy <= 63 then
-          local ok, err = pcall(trigger_star, star)
-          if ok then
-            triggered[star.id] = true
-          else
-            dbg.frame_err = short_err(err)
-          end
-        end
-      end
-    end
-  end
-end
-
 -- -------------------------------------------------------------------------
 -- Update loop
 
@@ -202,24 +191,42 @@ local function update_frame()
     return
   end
 
-  blink_acc = blink_acc + dt
-  if blink_acc >= 0.5 then
-    blink_acc = blink_acc - 0.5
-    state.blink = not state.blink
-    for id, t in pairs(state.flash_times) do
-      if now - t > 1.0 then state.flash_times[id] = nil end
-    end
+  -- Clean up expired flash times
+  for id, t in pairs(state.flash_times) do
+    if now - t > 1.0 then state.flash_times[id] = nil end
   end
 
-  if state.mode == "auto" and state.playing then
-    local speed = params:get("scan_speed")
-    if type(speed) ~= "number" then speed = 24 end
-    trigger_at(state.playhead_x, 1.5)
-    state.playhead_x = state.playhead_x + speed * dt
-    if state.playhead_x > 127 then
-      state.pan_x = (state.pan_x + 128.0 / state.zoom) % Stars.FIELD_W
-      state.playhead_x = 0
-      triggered = {}
+  -- Scan mode: advance pan_x and detect star crossings at x=64
+  if state.mode == "scan" and state.scan_speed ~= 0 then
+    local dx        = state.scan_speed * dt
+    local old_pan_x = state.pan_x
+    state.pan_x     = ((state.pan_x + dx) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
+    advance_hours(dx / 100)
+
+    for _, star in ipairs(sky) do
+      if star.dice <= state.density then
+        local par     = star.par or 1.0
+        local dvx_old = star.vx - old_pan_x * par
+        dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+        if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
+        local sx_old  = dvx_old * state.zoom
+        local sx_new  = screen_x(star)
+        if sx_new >= -2 and sx_new <= 129 then
+          local lo = math.min(sx_old, sx_new)
+          local hi = math.max(sx_old, sx_new)
+          if lo <= 64 and hi >= 64 then
+            -- cooldown gate: don't re-trigger within 0.4s of last flash
+            local ft = state.flash_times[star.id]
+            if not ft or now - ft > 0.4 then
+              local sy = (star.vy - state.pan_y) * state.zoom
+              if sy >= 0 and sy <= 63 then
+                local ok, err = pcall(trigger_star, star)
+                if not ok then dbg.frame_err = short_err(err) end
+              end
+            end
+          end
+        end
+      end
     end
   end
 
@@ -252,7 +259,6 @@ function init()
   params:add_number("lon",   "Longitude", -180, 180,  2)
 
   params:add_separator("SOUND")
-  params:add_control("scan_speed",  "Scan Speed",  controlspec.new(1,  60, 'lin', 0.5, 24,  "px/s"))
   params:add_control("pitch_base",  "Pitch Base",  controlspec.new(24, 84, 'lin', 1,   48,  "midi"))
   params:add_control("pitch_range", "Pitch Range", controlspec.new(1,  48, 'lin', 1,   24,  "semi"))
   params:add_control("out_vol",     "Volume",      controlspec.new(0,   1, 'lin', 0.01, 0.7))
@@ -310,43 +316,47 @@ end
 
 function enc(n, d)
   if state.startup then return end
+
   if n == 1 then
-    -- Zoom, anchored to screen center so the view doesn't drift
-    local factor = d > 0 and 1.06 or (1 / 1.06)
-    local vx_c = state.pan_x + 64 / state.zoom
-    local vy_c = state.pan_y + 32 / state.zoom
-    for _ = 1, math.abs(d) do
-      state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
+    if k_held[1] then
+      -- K1 held: adjust star density
+      state.density = util.clamp(state.density + d * 0.02, 0.04, 1.0)
+    else
+      -- Zoom anchored to screen center
+      local factor = d > 0 and 1.06 or (1 / 1.06)
+      local vx_c = state.pan_x + 64 / state.zoom
+      local vy_c = state.pan_y + 32 / state.zoom
+      for _ = 1, math.abs(d) do
+        state.zoom = util.clamp(state.zoom * factor, 0.3, 8.0)
+      end
+      state.pan_x = ((vx_c - 64 / state.zoom) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
+      state.pan_y = util.clamp(vy_c - 32 / state.zoom, 0, Stars.FIELD_H - 64)
     end
-    state.pan_x = ((vx_c - 64 / state.zoom) % Stars.FIELD_W + Stars.FIELD_W) % Stars.FIELD_W
-    state.pan_y = util.clamp(vy_c - 32 / state.zoom, 0, Stars.FIELD_H - 64)
 
   elseif n == 2 then
-    if k_held[2] then
-      k2_mod_used = true
-      state.density = util.clamp(state.density + d * 0.04, 0.04, 1.0)
+    if state.mode == "scan" then
+      -- Scan mode: adjust scan speed (±5 vx/s per tick; CW = forward, CCW = reverse)
+      state.scan_speed = util.clamp(state.scan_speed + d * 5, -100, 100)
     else
-      -- Horizontal pan; advancing/rewinding the night (100 vx = 1 RA hour)
+      -- Cursor mode: pan horizontally, trigger stars that cross x=64
       local old_pan_x = state.pan_x
       state.pan_x = ((state.pan_x + d * (3.0 / state.zoom)) % Stars.FIELD_W
                      + Stars.FIELD_W) % Stars.FIELD_W
-      state.disp_hour = (state.disp_hour + d * 0.03 / state.zoom + 24) % 24
+      advance_hours(d * 0.03 / state.zoom)
 
-      if state.mode == "cursor" then
-        for _, star in ipairs(sky) do
-          if star.dice <= state.density then
-            local sx_new = screen_x(star)
-            if sx_new >= -2 and sx_new <= 129 then
-              local dvx_old = star.vx - old_pan_x * (star.par or 1.0)
-              dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
-              if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
-              local lo = math.min(dvx_old * state.zoom, sx_new)
-              local hi = math.max(dvx_old * state.zoom, sx_new)
-              if lo <= 64 and hi >= 64 then
-                local sy = (star.vy - state.pan_y) * state.zoom
-                if sy >= 0 and sy <= 63 then
-                  pcall(trigger_star, star)
-                end
+      for _, star in ipairs(sky) do
+        if star.dice <= state.density then
+          local sx_new = screen_x(star)
+          if sx_new >= -2 and sx_new <= 129 then
+            local dvx_old = star.vx - old_pan_x * (star.par or 1.0)
+            dvx_old = ((dvx_old % Stars.FIELD_W) + Stars.FIELD_W) % Stars.FIELD_W
+            if dvx_old > Stars.FIELD_W / 2 then dvx_old = dvx_old - Stars.FIELD_W end
+            local lo = math.min(dvx_old * state.zoom, sx_new)
+            local hi = math.max(dvx_old * state.zoom, sx_new)
+            if lo <= 64 and hi >= 64 then
+              local sy = (star.vy - state.pan_y) * state.zoom
+              if sy >= 0 and sy <= 63 then
+                pcall(trigger_star, star)
               end
             end
           end
@@ -355,12 +365,10 @@ function enc(n, d)
     end
 
   elseif n == 3 then
-    -- Vertical pan
     state.pan_y = util.clamp(state.pan_y + d * (3.0 / state.zoom),
                              0, Stars.FIELD_H - 64)
   end
 end
-
 
 function key(n, z)
   if state.startup and z == 1 then
@@ -370,30 +378,17 @@ function key(n, z)
 
   k_held[n] = (z == 1)
 
-  if n == 1 then
-    if z == 1 then
-      k1_mod_used = false
-    elseif not k1_mod_used then
-      state.debug = not state.debug
-    end
-
-  elseif n == 2 then
-    if z == 1 then
-      k2_mod_used = false
-    elseif not k2_mod_used then
-      if state.mode == "auto" then
-        state.mode = "cursor"; state.playing = false
-      else
-        state.mode = "auto"
-      end
-    end
-
-  elseif n == 3 and z == 1 then
-    if state.mode == "auto" then
-      state.playing = not state.playing
-      if state.playing then triggered = {}; last_time = util.time() end
+  if n == 2 and z == 1 then
+    -- Toggle cursor/scan; entering cursor resets speed to 0
+    if state.mode == "scan" then
+      state.mode       = "cursor"
+      state.scan_speed = 0
+    else
+      state.mode = "scan"
     end
   end
+  -- K1 tap: nothing (hold tracked for E1 density modifier)
+  -- K3: nothing
 end
 
 function cleanup()
