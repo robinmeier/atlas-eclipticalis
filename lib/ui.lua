@@ -117,7 +117,7 @@ function UI.draw(sky_stars, state)
   screen.stroke()
 
   -- Star name labels: brief fade-in/out on trigger for named catalog stars
-  screen.font_size(6)
+  screen.font_size(8)
   for _, star in ipairs(sky_stars) do
     if star.name and star.dice <= state.density then
       local ft = state.flash_times[star.id]
