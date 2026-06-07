@@ -116,6 +116,34 @@ function UI.draw(sky_stars, state)
   screen.line(64, 63)
   screen.stroke()
 
+  -- Star name labels: brief fade-in/out on trigger for named catalog stars
+  screen.font_size(6)
+  for _, star in ipairs(sky_stars) do
+    if star.name and star.dice <= state.density then
+      local ft = state.flash_times[star.id]
+      if ft then
+        local age = now - ft
+        if age < 2.0 then
+          local lv = age < 0.4 and 11
+                     or math.max(1, math.floor(11 * (1 - (age - 0.4) / 1.6) + 0.5))
+          local dvx = star.vx - state.pan_x * (star.par or 1.0)
+          dvx = ((dvx % 2400) + 2400) % 2400
+          if dvx > 1200 then dvx = dvx - 2400 end
+          local sx = math.floor(dvx * state.zoom + 0.5)
+          local sy = math.floor((star.vy - state.pan_y) * state.zoom + 0.5)
+          if sx >= -30 and sx <= 158 and sy >= 0 and sy <= 63 then
+            local tw = screen.text_extents(star.name)
+            local nx = sx + 4
+            if nx + tw > 126 then nx = sx - tw - 4 end
+            screen.level(lv)
+            screen.move(nx, math.max(6, math.min(62, sy + 1)))
+            screen.text(star.name)
+          end
+        end
+      end
+    end
+  end
+
   -- HUD
   screen.font_size(8)
   screen.level(4)

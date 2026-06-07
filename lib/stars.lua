@@ -236,6 +236,106 @@ local CATALOG = {
   {20.9270,  41.1673,  2.46},  -- Epsilon Cygni
 }
 
+-- Display names aligned 1-to-1 with CATALOG entries
+local NAMES = {
+  -- Canis Major
+  "Sirius","Adhara","Wezen","Aludra","Furud",
+  -- Carina
+  "Canopus","Miaplacidus","Avior","Aspidiske","Tureis",
+  -- Centaurus
+  "Alpha Cen","Hadar","Menkent","Muhlifain","Epsilon Cen","Eta Cen","Theta Cen",
+  -- Boötes
+  "Arcturus","Izar","Muphrid","Seginus","Nekkar",
+  -- Lyra
+  "Vega","Sulafat","Sheliak",
+  -- Auriga
+  "Capella","Menkalinan","Theta Aur","Hassaleh",
+  -- Orion
+  "Rigel","Betelgeuse","Bellatrix","Alnilam","Alnitak","Saiph","Mintaka","Meissa","Eta Ori",
+  -- Gemini
+  "Pollux","Castor","Alhena","Wasat","Mebsuda","Propus","Tejat",
+  -- Canis Minor
+  "Procyon","Gomeisa",
+  -- Taurus
+  "Aldebaran","Elnath","Zeta Tau","Alcyone","Atlas","Electra","Ain",
+  -- Leo
+  "Regulus","Denebola","Zosma","Algieba","Chertan","Chort","Eta Leo",
+  -- Virgo
+  "Spica","Vindemiatrix","Porrima","Heze","Zaniah",
+  -- Scorpius
+  "Antares","Shaula","Sargas","Epsilon Sco","Dschubba","Grafias","Eta Sco","Tau Sco","Pi Sco",
+  -- Sagittarius
+  "Kaus Aus.","Nunki","Ascella","Kaus Media","Kaus Bor.","Pi Sgr","Alnasl","Phi Sgr",
+  -- Cygnus
+  "Deneb","Sadr","Gienah Cyg","Delta Cyg","Albireo","Zeta Cyg",
+  -- Aquila
+  "Altair","Tarazed","Okab",
+  -- Crux
+  "Acrux","Mimosa","Gacrux","Delta Cru",
+  -- Perseus
+  "Mirfak","Algol","Zeta Per","Miram",
+  -- Cassiopeia
+  "Schedar","Caph","Gamma Cas","Ruchbah","Segin",
+  -- Ursa Major
+  "Alioth","Dubhe","Alkaid","Mizar","Merak","Phecda","Megrez","Alcor",
+  -- Ursa Minor
+  "Polaris","Kochab","Pherkad",
+  -- Andromeda
+  "Alpheratz","Mirach","Almach",
+  -- Eridanus
+  "Achernar","Acamar","Cursa","Zaurak",
+  -- Piscis Austrinus
+  "Fomalhaut",
+  -- Pegasus
+  "Markab","Scheat","Enif","Algenib","Homam",
+  -- Aries
+  "Hamal","Sheratan",
+  -- Cetus
+  "Diphda",
+  -- Phoenix
+  "Ankaa",
+  -- Grus
+  "Alnair","Beta Gru",
+  -- Pavo
+  "Peacock",
+  -- Triangulum Australe
+  "Atria",
+  -- Pavo addl.
+  "Delta Pav",
+  -- Ophiuchus
+  "Rasalhague","Sabik","Yed Prior","Eta Oph","Zeta Oph",
+  -- Hercules
+  "Kornephoros","Zeta Her","Sarin",
+  -- Draco
+  "Eltanin","Rastaban","Thuban","Aldhibah",
+  -- Libra
+  "Zubenel.","Zubenesc.","Sigma Lib",
+  -- Serpens
+  "Unukalhai",
+  -- Corona Borealis
+  "Alphecca",
+  -- Hydra
+  "Alphard",
+  -- Corvus
+  "Gienah Cor","Algorab","Kraz",
+  -- Cepheus
+  "Alderamin","Alfirk",
+  -- Capricornus
+  "Deneb Alg.","Dabih",
+  -- Aquarius
+  "Sadalsuud","Sadalmelik","Skat",
+  -- Lupus
+  "Alpha Lup","Beta Lup",
+  -- Vela
+  "Gamma Vel","Delta Vel","Kappa Vel",
+  -- Puppis
+  "Naos","Azmidi","Pi Pup",
+  -- Ara
+  "Beta Ara","Alpha Ara",
+  -- Cygnus (more)
+  "Epsilon Cyg",
+}
+
 local _all = nil  -- loaded once
 
 local function mag_to_brightness(m)
@@ -278,6 +378,7 @@ function Stars.load()
       ra         = s[1],
       dec        = s[2],
       mag        = s[3],
+      name       = NAMES[i],
       vx         = (s[1] * 100) % Stars.FIELD_W,
       vy         = (90 - s[2]) * 4,
       brightness = mag_to_brightness(s[3]),
