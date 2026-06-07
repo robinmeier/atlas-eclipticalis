@@ -191,9 +191,9 @@ local function update_frame()
     return
   end
 
-  -- Clean up expired flash times
+  -- Clean up expired flash times (kept 2.5s so name labels can fade fully)
   for id, t in pairs(state.flash_times) do
-    if now - t > 1.0 then state.flash_times[id] = nil end
+    if now - t > 2.5 then state.flash_times[id] = nil end
   end
 
   -- Scan mode: advance pan_x and detect star crossings at x=64
